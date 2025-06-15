@@ -1,0 +1,18 @@
+{
+  "name": "my-iptv-addon",
+  "version": "1.0.0",
+  "description": "My IPTV addon for Stremio",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.11",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^2.6.7"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
