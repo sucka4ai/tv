@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, Favorites & Filters
+// IPTV Addon for Stremio with EPG, Now/Next, Favorites, Filters & Secure Proxy
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -6,6 +6,7 @@ const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
+const { URL } = require('url');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -121,7 +122,7 @@ app.get('/manifest.json', (req, res) => {
     id: "com.iptv.addon",
     version: "3.0.0",
     name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, and favorites",
+    description: "IPTV with EPG, now/next, search, filters, favorites & proxy",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -175,7 +176,39 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   if (!channel) return res.status(404).send('Channel not found');
 
-  res.json({ streams: [{ title: channel.name, url: channel.url }] });
+  res.json({
+    streams: [{
+      title: channel.name,
+      url: `${req.protocol}://${req.get('host')}/proxy?url=${encodeURIComponent(channel.url)}`
+    }]
+  });
+});
+
+app.get('/proxy', async (req, res) => {
+  const rawUrl = req.query.url;
+  if (!rawUrl) return res.status(400).send('Missing ?url=');
+
+  let targetUrl;
+  try {
+    targetUrl = new URL(rawUrl);
+  } catch (e) {
+    return res.status(400).send('Invalid URL');
+  }
+
+  try {
+    const streamRes = await fetch(targetUrl.toString(), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (SmartTV; Tizen 6.0) AppleWebKit/537.36 Chrome/87.0.4280.141 Safari/537.36'
+      }
+    });
+
+    if (!streamRes.ok) return res.status(streamRes.status).send('Upstream error');
+    res.setHeader('Content-Type', streamRes.headers.get('content-type') || 'application/octet-stream');
+    streamRes.body.pipe(res);
+  } catch (err) {
+    console.error('Proxy error:', err.message);
+    res.status(500).send('Proxy failed');
+  }
 });
 
 app.get('/favorites/:action/:id', (req, res) => {
