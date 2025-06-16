@@ -22,18 +22,9 @@ let favorites = new Set();
 
 async function loadM3U() {
   try {
-    console.log('🔄 Fetching M3U playlist from:', M3U_URL);
     const res = await fetch(M3U_URL);
     const text = await res.text();
-
-    console.log('🔎 M3U playlist content preview:\n', text.slice(0, 300));
-
     const parsed = m3uParser.parse(text);
-
-    if (!parsed.items || parsed.items.length === 0) {
-      console.error('❌ Parsed M3U returned no items.');
-      return;
-    }
 
     channels = parsed.items.map((item, index) => ({
       id: `iptv:${index}`,
@@ -55,9 +46,9 @@ async function loadM3U() {
       catalogsByGroup[channel.group].push(channel);
     }
 
-    console.log(`✅ Loaded ${channels.length} channels from M3U.`);
+    console.log(`✅ Loaded ${channels.length} channels.`);
   } catch (err) {
-    console.error('❌ Failed to load or parse M3U:', err);
+    console.error('❌ Failed to load M3U:', err);
   }
 }
 
@@ -84,7 +75,7 @@ async function loadEPG() {
       });
     }
 
-    console.log(`✅ Loaded EPG data for ${Object.keys(epgData).length} channels.`);
+    console.log(`✅ EPG loaded: ${Object.keys(epgData).length} channels`);
   } catch (err) {
     console.error('❌ Failed to load EPG:', err);
   }
@@ -191,7 +182,7 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
   res.json({
-    streams: [{ title: channel.name, url: `${req.protocol}://${req.get('host')}${proxyUrl}` }]
+    streams: [{ title: channel.name, url: `${req.protocol === 'http' ? 'https' : req.protocol}://${req.get('host')}${proxyUrl}` }]
   });
 });
 
@@ -202,13 +193,22 @@ app.get('/favorites/:action/:id', (req, res) => {
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
 
-// Proxy route for Samsung TV compatibility
+// Proxy route with headers for better compatibility
 app.use('/proxy', createProxyMiddleware({
-  target: '',
   changeOrigin: true,
+  target: '', // dynamic
   router: (req) => decodeURIComponent(req.url.slice(1)),
-  pathRewrite: (path, req) => '',
-  logLevel: 'silent'
+  pathRewrite: () => '',
+  logLevel: 'silent',
+  onProxyReq: (proxyReq, req, res) => {
+    proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0');
+    proxyReq.setHeader('Origin', 'http://localhost');
+  },
+  onProxyRes: (proxyRes) => {
+    proxyRes.headers['Access-Control-Allow-Origin'] = '*';
+    proxyRes.headers['Access-Control-Allow-Headers'] = '*';
+    proxyRes.headers['Access-Control-Allow-Methods'] = 'GET,OPTIONS';
+  }
 }));
 
 app.listen(PORT, async () => {
