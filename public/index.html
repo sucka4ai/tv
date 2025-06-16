@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IPTV Addon UI</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      color: #fff;
+      background: url('background.jpg') no-repeat center center fixed;
+      background-size: cover;
+      overflow-x: hidden;
+    }
+    .overlay {
+      background: rgba(0, 0, 0, 0.7);
+      padding: 1rem;
+      min-height: 100vh;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: #222;
+      border-radius: 8px;
+      overflow: hidden;
+      text-align: center;
+      padding: 0.5rem;
+    }
+    .card img {
+      width: 100%;
+      height: 100px;
+      object-fit: contain;
+    }
+    .card h3 {
+      font-size: 1rem;
+      margin: 0.5rem 0;
+    }
+    .fav-btn {
+      background: #444;
+      color: #fff;
+      border: none;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .fav-btn.favorited {
+      background: #e91e63;
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <h1>📺 IPTV Addon Channels</h1>
+    <div id="channelGrid" class="grid"></div>
+  </div>
+
+  <script>
+    async function loadChannels() {
+      const res = await fetch('/catalog/tv/iptv_all.json');
+      const data = await res.json();
+      const container = document.getElementById('channelGrid');
+
+      data.metas.forEach(meta => {
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const img = document.createElement('img');
+        img.src = meta.poster || '';
+        img.alt = meta.name;
+
+        const title = document.createElement('h3');
+        title.textContent = meta.name;
+
+        const btn = document.createElement('button');
+        btn.className = 'fav-btn';
+        btn.textContent = '❤️ Favorite';
+        btn.onclick = () => {
+          btn.classList.toggle('favorited');
+          fetch(`/favorites/${btn.classList.contains('favorited') ? 'add' : 'remove'}/${meta.id}`);
+        };
+
+        card.appendChild(img);
+        card.appendChild(title);
+        card.appendChild(btn);
+        container.appendChild(card);
+      });
+    }
+
+    loadChannels();
+  </script>
+</body>
+</html>
