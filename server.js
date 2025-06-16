@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Lightweight Web UI
+// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Web UI
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -15,13 +15,11 @@ const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
 const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 
 app.use(cors());
-
-// Serve the static frontend
 app.use('/ui', express.static(path.join(__dirname, 'public')));
 
 let channels = [];
-let epgData = {}; // { tvg-id: [programs] }
-let catalogsByGroup = {}; // { group-title: [channels] }
+let epgData = {};
+let catalogsByGroup = {};
 let favorites = new Set();
 
 async function loadM3U() {
@@ -44,9 +42,7 @@ async function loadM3U() {
 
     catalogsByGroup = {};
     for (const channel of channels) {
-      if (!catalogsByGroup[channel.group]) {
-        catalogsByGroup[channel.group] = [];
-      }
+      if (!catalogsByGroup[channel.group]) catalogsByGroup[channel.group] = [];
       catalogsByGroup[channel.group].push(channel);
     }
 
@@ -59,8 +55,9 @@ async function loadM3U() {
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
-    const contentType = res.headers.get('content-type');
+    const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('xml')) throw new Error(`Invalid content-type for EPG: ${contentType}`);
+
     const xml = await res.text();
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
@@ -125,14 +122,14 @@ app.get('/manifest.json', (req, res) => {
   });
 
   res.json({
-    id: "com.iptv.addon",
-    version: "3.0.0",
-    name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, favorites, and web UI",
-    logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
-    resources: ["catalog", "stream"],
-    types: ["tv"],
-    idPrefixes: ["iptv:"],
+    id: 'com.iptv.addon',
+    version: '4.0.0',
+    name: 'Full IPTV Addon with UI',
+    description: 'IPTV with EPG, search, proxy, favorites, and web UI',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png',
+    resources: ['catalog', 'stream'],
+    types: ['tv'],
+    idPrefixes: ['iptv:'],
     catalogs
   });
 });
@@ -143,11 +140,9 @@ app.get('/catalog/:type/:id.json', (req, res) => {
   if (type !== 'tv') return res.status(404).send('Invalid type');
 
   let filtered = [];
-  if (id === 'iptv_all') {
-    filtered = channels;
-  } else if (id === 'iptv_favorites') {
-    filtered = channels.filter(c => favorites.has(c.id));
-  } else if (id.startsWith('iptv_')) {
+  if (id === 'iptv_all') filtered = channels;
+  else if (id === 'iptv_favorites') filtered = channels.filter(c => favorites.has(c.id));
+  else if (id.startsWith('iptv_')) {
     const group = id.replace('iptv_', '').replace(/_/g, ' ');
     filtered = catalogsByGroup[group] || [];
   }
@@ -173,13 +168,10 @@ app.get('/catalog/:type/:id.json', (req, res) => {
 });
 
 app.get('/stream/:type/:id.json', (req, res) => {
-  if (req.params.type !== 'tv' || !req.params.id.startsWith('iptv:')) {
-    return res.status(404).send('Invalid stream');
-  }
+  if (req.params.type !== 'tv' || !req.params.id.startsWith('iptv:')) return res.status(404).send('Invalid stream');
 
   const index = parseInt(req.params.id.split(':')[1], 10);
   const channel = channels[index];
-
   if (!channel) return res.status(404).send('Channel not found');
 
   const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
@@ -199,11 +191,12 @@ app.use('/proxy', createProxyMiddleware({
   target: '',
   changeOrigin: true,
   router: (req) => decodeURIComponent(req.url.slice(1)),
-  pathRewrite: (path, req) => '',
+  pathRewrite: () => '',
   logLevel: 'silent',
   onError: (err, req, res) => {
-    console.error('Proxy error:', err.message);
-    res.status(500).send('Proxy failed.');
+    console.error('❌ Proxy error:', err);
+    res.writeHead(500);
+    res.end('Proxy error');
   }
 }));
 
