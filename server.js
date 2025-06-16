@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, and Proxy Support
+// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Web UI
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -55,10 +55,8 @@ async function loadM3U() {
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
-    const contentType = res.headers.get('content-type');
-    if (!contentType || !contentType.includes('xml')) {
-      throw new Error(`Invalid content-type for EPG: ${contentType}`);
-    }
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('xml')) throw new Error(`Invalid content-type for EPG: ${contentType}`);
     const xml = await res.text();
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
@@ -75,7 +73,7 @@ async function loadEPG() {
       });
     }
 
-    console.log(`✅ EPG loaded: ${Object.keys(epgData).length} channels`);
+    console.log(`✅ Loaded EPG data for ${Object.keys(epgData).length} channels.`);
   } catch (err) {
     console.error('❌ Failed to load EPG:', err);
   }
@@ -124,9 +122,9 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.0.0",
+    version: "3.1.0",
     name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, and favorites",
+    description: "IPTV with EPG, now/next, search, filters, favorites, and UI",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -141,11 +139,9 @@ app.get('/catalog/:type/:id.json', (req, res) => {
   if (type !== 'tv') return res.status(404).send('Invalid type');
 
   let filtered = [];
-  if (id === 'iptv_all') {
-    filtered = channels;
-  } else if (id === 'iptv_favorites') {
-    filtered = channels.filter(c => favorites.has(c.id));
-  } else if (id.startsWith('iptv_')) {
+  if (id === 'iptv_all') filtered = channels;
+  else if (id === 'iptv_favorites') filtered = channels.filter(c => favorites.has(c.id));
+  else if (id.startsWith('iptv_')) {
     const group = id.replace('iptv_', '').replace(/_/g, ' ');
     filtered = catalogsByGroup[group] || [];
   }
@@ -182,7 +178,7 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
   res.json({
-    streams: [{ title: channel.name, url: `${req.protocol === 'http' ? 'https' : req.protocol}://${req.get('host')}${proxyUrl}` }]
+    streams: [{ title: channel.name, url: `${req.protocol}://${req.get('host')}${proxyUrl}` }]
   });
 });
 
@@ -193,23 +189,43 @@ app.get('/favorites/:action/:id', (req, res) => {
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
 
-// Proxy route with headers for better compatibility
-app.use('/proxy', createProxyMiddleware({
-  changeOrigin: true,
-  target: '', // dynamic
-  router: (req) => decodeURIComponent(req.url.slice(1)),
-  pathRewrite: () => '',
-  logLevel: 'silent',
-  onProxyReq: (proxyReq, req, res) => {
-    proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0');
-    proxyReq.setHeader('Origin', 'http://localhost');
-  },
-  onProxyRes: (proxyRes) => {
-    proxyRes.headers['Access-Control-Allow-Origin'] = '*';
-    proxyRes.headers['Access-Control-Allow-Headers'] = '*';
-    proxyRes.headers['Access-Control-Allow-Methods'] = 'GET,OPTIONS';
-  }
-}));
+// Proxy with logging
+app.use('/proxy', (req, res, next) => {
+  const target = decodeURIComponent(req.url.slice(1));
+  console.log(`🔄 Proxying request to: ${target}`);
+  createProxyMiddleware({
+    target,
+    changeOrigin: true,
+    pathRewrite: () => '',
+    logLevel: 'warn'
+  })(req, res, next);
+});
+
+// Lightweight Web UI
+app.get('/ui', (req, res) => {
+  const html = `
+  <html><head><title>IPTV Channels</title></head><body>
+    <h1>IPTV Channels (${channels.length})</h1>
+    <form method="GET">
+      <input name="search" placeholder="Search" />
+      <select name="group">
+        <option value="">All Groups</option>
+        ${Object.keys(catalogsByGroup).map(g => `<option>${g}</option>`).join('')}
+      </select>
+      <button type="submit">Filter</button>
+    </form>
+    <ul>
+      ${channels.map((c, i) => `
+        <li>
+          <img src="${c.logo}" width="60" height="40" />
+          <strong>${c.name}</strong> (${c.group})
+          <br/>
+          <a href="/proxy/${encodeURIComponent(c.url)}" target="_blank">▶ Play</a>
+        </li>`).join('')}
+    </ul>
+  </body></html>`;
+  res.send(html);
+});
 
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
