@@ -56,7 +56,6 @@ async function loadM3U() {
   }
 }
 
-const sax = require('sax');
 const zlib = require('zlib');
 const { Transform } = require('stream');
 
