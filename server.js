@@ -3,7 +3,7 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const m3uParser = require('iptv-playlist-parser');
-const sax = require('sax'); // Streaming XML parser
+const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
 
@@ -19,6 +19,8 @@ let epgData = {}; // { tvg-id: [programs] }
 let catalogsByGroup = {}; // { group-title: [channels] }
 let favorites = new Set();
 
+const TARGET_COUNTRIES = ['gb', 'us'];
+
 async function loadM3U() {
   try {
     const res = await fetch(M3U_URL);
@@ -27,8 +29,8 @@ async function loadM3U() {
 
     channels = parsed.items
       .filter(item => {
-        const country = item.tvg?.country?.toLowerCase();
-        return country === 'gb' || country === 'uk' || country === 'us';
+        const country = item.tvg?.country?.toLowerCase() || '';
+        return TARGET_COUNTRIES.some(c => country.includes(c));
       })
       .map((item, index) => ({
         id: `iptv:${index}`,
@@ -50,107 +52,42 @@ async function loadM3U() {
       catalogsByGroup[channel.group].push(channel);
     }
 
-    console.log(`Loaded ${channels.length} UK/US channels.`);
+    console.log(`✅ Loaded ${channels.length} UK/US channels.`);
   } catch (err) {
     console.error('Failed to load M3U:', err);
   }
 }
 
-const zlib = require('zlib');
-const { Transform } = require('stream');
-
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
+    const xml = await res.text();
+    const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
-    const contentEncoding = res.headers.get('content-encoding');
-    let stream = res.body;
-
-    if (contentEncoding === 'gzip') {
-      stream = stream.pipe(zlib.createGunzip());
+    epgData = {};
+    for (const prog of parsed.tv.programme || []) {
+      const channelId = prog.channel[0];
+      if (!epgData[channelId]) epgData[channelId] = [];
+      epgData[channelId].push({
+        title: prog.title?.[0]._ || '',
+        start: prog.start[0],
+        stop: prog.stop[0],
+        desc: prog.desc?.[0]._ || '',
+        category: prog.category?.[0]._ || ''
+      });
     }
 
-    // Sanitize any junk before <tv>
-    const cleanStream = stream.pipe(new Transform({
-      readableObjectMode: false,
-      transform(chunk, encoding, callback) {
-        const chunkStr = chunk.toString();
-        const idx = chunkStr.indexOf('<tv');
-        if (idx !== -1) {
-          this.push(chunkStr.slice(idx));
-        } else {
-          this.push('');
-        }
-        callback();
-      }
-    }));
-
-    const parser = sax.createStream(true, {
-      trim: true,
-      normalize: true,
-      xmlns: false,
-      maxBufferLength: 16 * 1024 * 1024
+    // Filter EPG data to match loaded channels
+    const validIds = new Set(channels.map(c => c.tvgId));
+    Object.keys(epgData).forEach(key => {
+      if (!validIds.has(key)) delete epgData[key];
     });
 
-    let currentProgram = null;
-
-    parser.on('opentag', node => {
-      if (node.name === 'programme') {
-        currentProgram = {
-          channel: node.attributes.channel,
-          start: node.attributes.start,
-          stop: node.attributes.stop,
-          title: '',
-          desc: '',
-          category: ''
-        };
-      } else if (currentProgram && ['title', 'desc', 'category'].includes(node.name)) {
-        currentProgram._collecting = node.name;
-        currentProgram[node.name] = '';
-      }
-    });
-
-    parser.on('text', text => {
-      if (currentProgram && currentProgram._collecting) {
-        currentProgram[currentProgram._collecting] += text;
-      }
-    });
-
-    parser.on('closetag', tag => {
-      if (tag === 'programme' && currentProgram) {
-        const tvgId = currentProgram.channel;
-        if (!epgData[tvgId]) epgData[tvgId] = [];
-        epgData[tvgId].push({
-          title: currentProgram.title.trim(),
-          desc: currentProgram.desc.trim(),
-          category: currentProgram.category.trim(),
-          start: currentProgram.start,
-          stop: currentProgram.stop
-        });
-        currentProgram = null;
-      } else if (currentProgram && currentProgram._collecting === tag) {
-        currentProgram._collecting = null;
-      }
-    });
-
-    parser.on('error', err => {
-      console.error('EPG Parsing error:', err);
-      cleanStream.destroy();
-    });
-
-    cleanStream.pipe(parser);
-
-    await new Promise((resolve, reject) => {
-      parser.on('end', resolve);
-      parser.on('error', reject);
-    });
-
-    console.log(`✅ EPG loaded: ${Object.keys(epgData).length} channels`);
+    console.log(`🎯 Filtered EPG to ${Object.keys(epgData).length} matching channels.`);
   } catch (err) {
     console.error('Failed to load EPG:', err);
   }
 }
-
 
 function getNowNext(tvgId) {
   const now = dayjs();
@@ -178,7 +115,13 @@ app.get('/manifest.json', (req, res) => {
   catalogs.push({
     type: 'tv',
     id: 'iptv_all',
-    name: 'IPTV - All Channels'
+    name: 'IPTV - All Channels',
+    extra: [
+      { name: 'search', isRequired: false },
+      { name: 'genre', options: Object.keys(catalogsByGroup), isRequired: false },
+      { name: 'country', isRequired: false },
+      { name: 'language', isRequired: false }
+    ]
   });
 
   catalogs.push({
@@ -191,7 +134,7 @@ app.get('/manifest.json', (req, res) => {
     id: "com.iptv.addon",
     version: "3.0.0",
     name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, favorites, and UK/US filter",
+    description: "IPTV with EPG, now/next, search, filters, and favorites",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -202,6 +145,7 @@ app.get('/manifest.json', (req, res) => {
 
 app.get('/catalog/:type/:id.json', (req, res) => {
   const { type, id } = req.params;
+  const { search = '', genre, country, language } = req.query;
   if (type !== 'tv') return res.status(404).send('Invalid type');
 
   let filtered = [];
@@ -213,6 +157,11 @@ app.get('/catalog/:type/:id.json', (req, res) => {
     const group = id.replace('iptv_', '').replace(/_/g, ' ');
     filtered = catalogsByGroup[group] || [];
   }
+
+  if (search) filtered = filtered.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  if (genre) filtered = filtered.filter(c => c.group === genre);
+  if (country) filtered = filtered.filter(c => c.country.toLowerCase().includes(country.toLowerCase()));
+  if (language) filtered = filtered.filter(c => c.language.toLowerCase().includes(language.toLowerCase()));
 
   const metas = filtered.map(c => {
     const { current, next } = getNowNext(c.tvgId);
