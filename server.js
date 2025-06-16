@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Web UI
+// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Samsung TV Compatibility
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -6,9 +6,7 @@ const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
-const path = require('path');
-const fs = require('fs');
-const { pipeline } = require('stream');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,11 +14,11 @@ const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
 const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
+app.options('*', cors()); // Handle preflight for CORS
 
 let channels = [];
-let epgData = {};
-let catalogsByGroup = {};
+let epgData = {}; // { tvg-id: [programs] }
+let catalogsByGroup = {}; // { group-title: [channels] }
 let favorites = new Set();
 
 async function loadM3U() {
@@ -29,17 +27,19 @@ async function loadM3U() {
     const text = await res.text();
     const parsed = m3uParser.parse(text);
 
-    channels = parsed.items.map((item, index) => ({
-      id: `iptv:${index}`,
-      name: item.name || `Channel ${index}`,
-      description: item.tvg?.name || '',
-      logo: item.tvg?.logo || '',
-      tvgId: item.tvg?.id || '',
-      country: item.tvg?.country || 'Unknown',
-      language: item.tvg?.language || 'Unknown',
-      group: item.group?.title || 'Other',
-      url: item.url
-    }));
+    channels = parsed.items
+      .filter(item => item.url && item.url.endsWith('.m3u8')) // Only m3u8
+      .map((item, index) => ({
+        id: `iptv:${index}`,
+        name: item.name || `Channel ${index}`,
+        description: item.tvg?.name || '',
+        logo: item.tvg?.logo || '',
+        tvgId: item.tvg?.id || '',
+        country: item.tvg?.country || 'Unknown',
+        language: item.tvg?.language || 'Unknown',
+        group: item.group?.title || 'Other',
+        url: item.url
+      }));
 
     catalogsByGroup = {};
     for (const channel of channels) {
@@ -59,9 +59,8 @@ async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
     const contentType = res.headers.get('content-type');
-    if (!contentType.includes('xml') && !contentType.includes('text')) {
-      throw new Error(`Invalid content-type for EPG: ${contentType}`);
-    }
+    if (!contentType.includes('xml')) throw new Error(`Invalid content-type for EPG: ${contentType}`);
+
     const xml = await res.text();
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
@@ -127,9 +126,9 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.1.0",
+    version: "3.0.0",
     name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, favorites, and web UI",
+    description: "IPTV with EPG, now/next, search, filters, and favorites",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -180,28 +179,24 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   const index = parseInt(req.params.id.split(':')[1], 10);
   const channel = channels[index];
+
   if (!channel) return res.status(404).send('Channel not found');
 
-  const streamUrl = `/proxy?url=${encodeURIComponent(channel.url)}`;
+  const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
   res.json({
-    streams: [{ title: channel.name, url: `${req.protocol}://${req.get('host')}${streamUrl}` }]
+    streams: [{
+      title: channel.name,
+      url: `${req.protocol}://${req.get('host')}${proxyUrl}`,
+      behaviorHints: {
+        notWebReady: false,
+        proxyHeaders: {
+          'User-Agent': 'Mozilla/5.0 (SmartTV)',
+          'Referer': req.get('origin') || ''
+        },
+        mimeType: 'application/vnd.apple.mpegurl'
+      }
+    }]
   });
-});
-
-app.get('/proxy', async (req, res) => {
-  const url = req.query.url;
-  if (!url) return res.status(400).send('Missing URL');
-
-  try {
-    const response = await fetch(url);
-    res.set('Content-Type', response.headers.get('content-type'));
-    pipeline(response.body, res, err => {
-      if (err) console.error('Proxy stream error:', err);
-    });
-  } catch (err) {
-    console.error('Proxy fetch failed:', err);
-    res.status(502).send('Stream proxy error');
-  }
 });
 
 app.get('/favorites/:action/:id', (req, res) => {
@@ -210,6 +205,20 @@ app.get('/favorites/:action/:id', (req, res) => {
   else if (action === 'remove') favorites.delete(id);
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
+
+// Proxy route for Samsung TV compatibility
+app.use('/proxy', createProxyMiddleware({
+  changeOrigin: true,
+  target: '',
+  selfHandleResponse: false,
+  onProxyReq: (proxyReq, req, res) => {
+    proxyReq.setHeader('Access-Control-Allow-Origin', '*');
+    proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0 (SmartTV)');
+  },
+  router: (req) => decodeURIComponent(req.url.slice(1)),
+  pathRewrite: (path, req) => '',
+  logLevel: 'debug'
+}));
 
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
