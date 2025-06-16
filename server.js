@@ -6,6 +6,7 @@ const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
+const path = require('path');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
@@ -14,10 +15,11 @@ const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
 const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 
 app.use(cors());
+app.use(express.static(path.join(__dirname, 'public'))); // Serve static frontend files
 
 let channels = [];
-let epgData = {}; // { tvg-id: [programs] }
-let catalogsByGroup = {}; // { group-title: [channels] }
+let epgData = {};
+let catalogsByGroup = {};
 let favorites = new Set();
 
 async function loadM3U() {
@@ -55,8 +57,10 @@ async function loadM3U() {
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('xml')) throw new Error(`Invalid content-type for EPG: ${contentType}`);
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('xml')) {
+      throw new Error(`Invalid content-type for EPG: ${contentType}`);
+    }
     const xml = await res.text();
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
@@ -122,9 +126,9 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.1.0",
+    version: "4.0.0",
     name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, favorites, and UI",
+    description: "IPTV with EPG, now/next, search, filters, favorites, and web UI",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -139,9 +143,11 @@ app.get('/catalog/:type/:id.json', (req, res) => {
   if (type !== 'tv') return res.status(404).send('Invalid type');
 
   let filtered = [];
-  if (id === 'iptv_all') filtered = channels;
-  else if (id === 'iptv_favorites') filtered = channels.filter(c => favorites.has(c.id));
-  else if (id.startsWith('iptv_')) {
+  if (id === 'iptv_all') {
+    filtered = channels;
+  } else if (id === 'iptv_favorites') {
+    filtered = channels.filter(c => favorites.has(c.id));
+  } else if (id.startsWith('iptv_')) {
     const group = id.replace('iptv_', '').replace(/_/g, ' ');
     filtered = catalogsByGroup[group] || [];
   }
@@ -189,43 +195,14 @@ app.get('/favorites/:action/:id', (req, res) => {
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
 
-// Proxy with logging
-app.use('/proxy', (req, res, next) => {
-  const target = decodeURIComponent(req.url.slice(1));
-  console.log(`🔄 Proxying request to: ${target}`);
-  createProxyMiddleware({
-    target,
-    changeOrigin: true,
-    pathRewrite: () => '',
-    logLevel: 'warn'
-  })(req, res, next);
-});
-
-// Lightweight Web UI
-app.get('/ui', (req, res) => {
-  const html = `
-  <html><head><title>IPTV Channels</title></head><body>
-    <h1>IPTV Channels (${channels.length})</h1>
-    <form method="GET">
-      <input name="search" placeholder="Search" />
-      <select name="group">
-        <option value="">All Groups</option>
-        ${Object.keys(catalogsByGroup).map(g => `<option>${g}</option>`).join('')}
-      </select>
-      <button type="submit">Filter</button>
-    </form>
-    <ul>
-      ${channels.map((c, i) => `
-        <li>
-          <img src="${c.logo}" width="60" height="40" />
-          <strong>${c.name}</strong> (${c.group})
-          <br/>
-          <a href="/proxy/${encodeURIComponent(c.url)}" target="_blank">▶ Play</a>
-        </li>`).join('')}
-    </ul>
-  </body></html>`;
-  res.send(html);
-});
+// Proxy route for Samsung TV compatibility
+app.use('/proxy', createProxyMiddleware({
+  target: '',
+  changeOrigin: true,
+  router: (req) => decodeURIComponent(req.url.slice(1)),
+  pathRewrite: (path, req) => '',
+  logLevel: 'silent'
+}));
 
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
