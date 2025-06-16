@@ -1,17 +1,17 @@
-// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Web UI
+// IPTV Addon for Stremio with EPG, Now/Next, and Proxy Support
 
 const express = require('express');
 const fetch = require('node-fetch');
 const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
-const path = require('path');
 const dayjs = require('dayjs');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const M3U_URL = process.env.M3U_URL || 'https://iptv-org.github.io/iptv/countries/gb.m3u';
+const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
 const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 
 app.use(cors());
@@ -26,24 +26,21 @@ async function loadM3U() {
   try {
     const res = await fetch(M3U_URL);
     const text = await res.text();
-
-    if (!text.startsWith('#EXTM3U')) {
-      throw new Error('Playlist is not valid');
-    }
-
     const parsed = m3uParser.parse(text);
 
-    channels = parsed.items.map((item, index) => ({
-      id: `iptv:${index}`,
-      name: item.name || `Channel ${index}`,
-      description: item.tvg?.name || '',
-      logo: item.tvg?.logo || '',
-      tvgId: item.tvg?.id || '',
-      country: item.tvg?.country || 'Unknown',
-      language: item.tvg?.language || 'Unknown',
-      group: item.group?.title || 'Other',
-      url: item.url
-    }));
+    channels = parsed.items
+      .filter(item => item.url && item.url.startsWith('http'))
+      .map((item, index) => ({
+        id: `iptv:${index}`,
+        name: item.name || `Channel ${index}`,
+        description: item.tvg?.name || '',
+        logo: item.tvg?.logo || '',
+        tvgId: item.tvg?.id || '',
+        country: item.tvg?.country || 'Unknown',
+        language: item.tvg?.language || 'Unknown',
+        group: item.group?.title || 'Other',
+        url: item.url
+      }));
 
     catalogsByGroup = {};
     for (const channel of channels) {
@@ -63,10 +60,9 @@ async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
     const contentType = res.headers.get('content-type');
-    if (!contentType || !contentType.includes('xml')) {
+    if (!contentType.includes('xml')) {
       throw new Error(`Invalid content-type for EPG: ${contentType}`);
     }
-
     const xml = await res.text();
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
@@ -83,7 +79,7 @@ async function loadEPG() {
       });
     }
 
-    console.log(`✅ EPG loaded for ${Object.keys(epgData).length} channels.`);
+    console.log(`✅ Loaded EPG for ${Object.keys(epgData).length} channels.`);
   } catch (err) {
     console.error('❌ Failed to load EPG:', err);
   }
@@ -132,9 +128,9 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.1.0",
-    name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, favorites, and Web UI",
+    version: "4.0.0",
+    name: "Enhanced IPTV Addon",
+    description: "IPTV with full features, EPG, filtering, web UI, and fallback stream handling",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -190,7 +186,10 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   const streamUrl = `${req.protocol}://${req.get('host')}/proxy/${encodeURIComponent(channel.url)}`;
   res.json({
-    streams: [{ title: channel.name, url: streamUrl }]
+    streams: [
+      { title: channel.name, url: streamUrl },
+      { title: 'Fallback Direct', url: channel.url }
+    ]
   });
 });
 
@@ -204,14 +203,12 @@ app.get('/favorites/:action/:id', (req, res) => {
 app.use('/proxy', createProxyMiddleware({
   target: '',
   changeOrigin: true,
-  router: (req) => decodeURIComponent(req.url.slice(1)),
+  router: req => decodeURIComponent(req.url.slice(1)),
   pathRewrite: () => '',
-  logLevel: 'debug',
-  onError: (err, req, res) => {
-    console.error('Proxy error:', err);
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Proxy error');
-  }
+  onProxyReq: (proxyReq) => {
+    proxyReq.setHeader('User-Agent', 'Mozilla/5.0');
+  },
+  logLevel: 'debug'
 }));
 
 app.listen(PORT, async () => {
