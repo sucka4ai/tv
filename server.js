@@ -1,8 +1,9 @@
 // IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Web UI
-// Add this at the very top of server.js
+
+// Using modern dynamic import for Node.js 18+
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 const express = require('express');
-const fetch = require('node-fetch');
 const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
