@@ -46,16 +46,27 @@ async function loadM3U() {
       catalogsByGroup[channel.group].push(channel);
     }
 
-    console.log(`Loaded ${channels.length} channels.`);
+    console.log(`✅ Loaded ${channels.length} channels.`);
   } catch (err) {
-    console.error('Failed to load M3U:', err);
+    console.error('❌ Failed to load M3U:', err);
   }
 }
 
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!contentType.includes('xml')) {
+      throw new Error(`Invalid content-type for EPG: ${contentType}`);
+    }
+
     const xml = await res.text();
+
+    if (!xml.trim().startsWith('<')) {
+      throw new Error('EPG XML does not start with a valid tag');
+    }
+
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
     epgData = {};
@@ -71,9 +82,9 @@ async function loadEPG() {
       });
     }
 
-    console.log(`Loaded EPG data for ${Object.keys(epgData).length} channels.`);
+    console.log(`✅ Loaded EPG data for ${Object.keys(epgData).length} channels.`);
   } catch (err) {
-    console.error('Failed to load EPG:', err);
+    console.error('❌ Failed to load EPG:', err);
   }
 }
 
@@ -190,20 +201,13 @@ app.get('/favorites/:action/:id', (req, res) => {
 });
 
 // Proxy route for Samsung TV compatibility
-app.use('/proxy/:encodedUrl', (req, res, next) => {
-  const targetUrl = decodeURIComponent(req.params.encodedUrl);
-  if (!targetUrl || !targetUrl.startsWith('http')) {
-    return res.status(400).send('Invalid or missing target URL');
-  }
-
-  createProxyMiddleware({
-    target: targetUrl,
-    changeOrigin: true,
-    pathRewrite: () => '',
-    logLevel: 'silent'
-  })(req, res, next);
-});
-
+app.use('/proxy', createProxyMiddleware({
+  target: '',
+  changeOrigin: true,
+  router: (req) => decodeURIComponent(req.url.slice(1)),
+  pathRewrite: (path, req) => '',
+  logLevel: 'silent'
+}));
 
 app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
