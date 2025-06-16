@@ -56,53 +56,93 @@ async function loadM3U() {
   }
 }
 
+const sax = require('sax');
+const zlib = require('zlib');
+
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
-    const xml = await res.text();
-    const parser = sax.parser(true);
 
-    let currentChannelId = '';
-    let currentProgram = {};
-    let currentTag = '';
+    const contentEncoding = res.headers.get('content-encoding');
+    let stream = res.body;
 
-    parser.onopentag = node => {
+    if (contentEncoding === 'gzip') {
+      stream = stream.pipe(zlib.createGunzip());
+    }
+
+    const parser = sax.createStream(true, {
+      trim: true,
+      normalize: true,
+      xmlns: false,
+      // Raise buffer limits for large chunks
+      maxBufferLength: 16 * 1024 * 1024 // 16MB buffer
+    });
+
+    let currentProgram = null;
+
+    parser.on('opentag', node => {
       if (node.name === 'programme') {
-        currentChannelId = node.attributes.channel;
         currentProgram = {
+          channel: node.attributes.channel,
           start: node.attributes.start,
           stop: node.attributes.stop,
           title: '',
           desc: '',
           category: ''
         };
+      } else if (currentProgram && node.name === 'title') {
+        currentProgram._collecting = 'title';
+        currentProgram.title = '';
+      } else if (currentProgram && node.name === 'desc') {
+        currentProgram._collecting = 'desc';
+        currentProgram.desc = '';
+      } else if (currentProgram && node.name === 'category') {
+        currentProgram._collecting = 'category';
+        currentProgram.category = '';
       }
-      currentTag = node.name;
-    };
+    });
 
-    parser.ontext = text => {
-      if (!currentProgram || !currentTag) return;
-      if (currentTag === 'title') currentProgram.title += text;
-      else if (currentTag === 'desc') currentProgram.desc += text;
-      else if (currentTag === 'category') currentProgram.category += text;
-    };
-
-    parser.onclosetag = tag => {
-      if (tag === 'programme') {
-        if (!epgData[currentChannelId]) epgData[currentChannelId] = [];
-        epgData[currentChannelId].push(currentProgram);
-        currentProgram = {};
-        currentChannelId = '';
+    parser.on('text', text => {
+      if (currentProgram && currentProgram._collecting) {
+        currentProgram[currentProgram._collecting] += text;
       }
-      currentTag = '';
-    };
+    });
 
-    parser.write(xml).close();
-    console.log(`EPG loaded with data for ${Object.keys(epgData).length} channels.`);
+    parser.on('closetag', tag => {
+      if (tag === 'programme' && currentProgram) {
+        const tvgId = currentProgram.channel;
+        if (!epgData[tvgId]) epgData[tvgId] = [];
+        epgData[tvgId].push({
+          title: currentProgram.title.trim(),
+          desc: currentProgram.desc.trim(),
+          category: currentProgram.category.trim(),
+          start: currentProgram.start,
+          stop: currentProgram.stop
+        });
+        currentProgram = null;
+      } else if (currentProgram && currentProgram._collecting === tag) {
+        currentProgram._collecting = null;
+      }
+    });
+
+    parser.on('error', err => {
+      console.error('EPG Parsing error:', err);
+      stream.destroy();
+    });
+
+    stream.pipe(parser);
+
+    await new Promise((resolve, reject) => {
+      parser.on('end', resolve);
+      parser.on('error', reject);
+    });
+
+    console.log(`EPG parsing complete. Channels with EPG: ${Object.keys(epgData).length}`);
   } catch (err) {
     console.error('Failed to load EPG:', err);
   }
 }
+
 
 function getNowNext(tvgId) {
   const now = dayjs();
