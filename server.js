@@ -11,7 +11,7 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
-const EPG_URL = process.env.EPG_URL || 'https://iptv-org.github.io/epg/guides/gb.xml';
+const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 
 app.use(cors());
 
@@ -55,18 +55,13 @@ async function loadM3U() {
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
-    const contentType = res.headers.get('content-type') || '';
+    const contentType = res.headers.get('content-type');
 
-    if (!contentType.includes('xml')) {
+    if (!contentType || !contentType.includes('xml')) {
       throw new Error(`Invalid content-type for EPG: ${contentType}`);
     }
 
     const xml = await res.text();
-
-    if (!xml.trim().startsWith('<')) {
-      throw new Error('EPG XML does not start with a valid tag');
-    }
-
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
     epgData = {};
@@ -184,7 +179,6 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   const index = parseInt(req.params.id.split(':')[1], 10);
   const channel = channels[index];
-
   if (!channel) return res.status(404).send('Channel not found');
 
   const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
@@ -200,17 +194,29 @@ app.get('/favorites/:action/:id', (req, res) => {
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
 
-// Proxy route for Samsung TV compatibility
-app.use('/proxy', createProxyMiddleware({
-  target: '',
-  changeOrigin: true,
-  router: (req) => decodeURIComponent(req.url.slice(1)),
-  pathRewrite: (path, req) => '',
-  logLevel: 'silent'
-}));
+// Updated Proxy route for Android & Smart TV compatibility
+app.use('/proxy', (req, res, next) => {
+  const targetUrl = decodeURIComponent(req.url.slice(1));
+  if (!/^https?:\/\//.test(targetUrl)) {
+    return res.status(400).send('Invalid target URL');
+  }
+
+  return createProxyMiddleware({
+    target: targetUrl,
+    changeOrigin: true,
+    selfHandleResponse: false,
+    secure: false,
+    headers: {
+      'User-Agent': req.get('User-Agent') || 'Mozilla/5.0',
+      'Referer': targetUrl
+    },
+    pathRewrite: () => '',
+    logLevel: 'silent'
+  })(req, res, next);
+});
 
 app.listen(PORT, async () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
   await loadM3U();
   await loadEPG();
 });
