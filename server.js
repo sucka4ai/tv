@@ -56,9 +56,6 @@ async function loadM3U() {
   }
 }
 
-const sax = require('sax');
-const zlib = require('zlib');
-
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
