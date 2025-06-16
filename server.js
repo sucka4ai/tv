@@ -190,13 +190,20 @@ app.get('/favorites/:action/:id', (req, res) => {
 });
 
 // Proxy route for Samsung TV compatibility
-app.use('/proxy', createProxyMiddleware({
-  target: '',
-  changeOrigin: true,
-  router: (req) => decodeURIComponent(req.url.slice(1)),
-  pathRewrite: (path, req) => '',
-  logLevel: 'silent'
-}));
+app.use('/proxy/:encodedUrl', (req, res, next) => {
+  const targetUrl = decodeURIComponent(req.params.encodedUrl);
+  if (!targetUrl || !targetUrl.startsWith('http')) {
+    return res.status(400).send('Invalid or missing target URL');
+  }
+
+  createProxyMiddleware({
+    target: targetUrl,
+    changeOrigin: true,
+    pathRewrite: () => '',
+    logLevel: 'silent'
+  })(req, res, next);
+});
+
 
 app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
