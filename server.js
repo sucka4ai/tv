@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, Favorites & Filters
+// IPTV Addon for Stremio with EPG, Now/Next, Favorites & Filters (UK/US Only)
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -6,11 +6,12 @@ const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
+const zlib = require('zlib');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
-const EPG_URL = process.env.EPG_URL || 'https://iptv-org.github.io/epg/guides/gb.xml';
+const EPG_URL = process.env.EPG_URL || 'https://iptv-org.github.io/epg/guides/gb.xml.gz';
 
 app.use(cors());
 
@@ -19,30 +20,23 @@ let epgData = {}; // { tvg-id: [programs] }
 let catalogsByGroup = {}; // { group-title: [channels] }
 let favorites = new Set();
 
-const TARGET_COUNTRIES = ['gb', 'us'];
-
 async function loadM3U() {
   try {
     const res = await fetch(M3U_URL);
     const text = await res.text();
     const parsed = m3uParser.parse(text);
 
-    channels = parsed.items
-      .filter(item => {
-        const country = item.tvg?.country?.toLowerCase() || '';
-        return TARGET_COUNTRIES.some(c => country.includes(c));
-      })
-      .map((item, index) => ({
-        id: `iptv:${index}`,
-        name: item.name || `Channel ${index}`,
-        description: item.tvg?.name || '',
-        logo: item.tvg?.logo || '',
-        tvgId: item.tvg?.id || '',
-        country: item.tvg?.country || 'Unknown',
-        language: item.tvg?.language || 'Unknown',
-        group: item.group?.title || 'Other',
-        url: item.url
-      }));
+    channels = parsed.items.map((item, index) => ({
+      id: `iptv:${index}`,
+      name: item.name || `Channel ${index}`,
+      description: item.tvg?.name || '',
+      logo: item.tvg?.logo || '',
+      tvgId: item.tvg?.id || '',
+      country: item.tvg?.country || 'Unknown',
+      language: item.tvg?.language || 'Unknown',
+      group: item.group?.title || 'Other',
+      url: item.url
+    })).filter(c => ['UK', 'US', 'United Kingdom', 'United States'].includes(c.country));
 
     catalogsByGroup = {};
     for (const channel of channels) {
@@ -54,15 +48,25 @@ async function loadM3U() {
 
     console.log(`✅ Loaded ${channels.length} UK/US channels.`);
   } catch (err) {
-    console.error('Failed to load M3U:', err);
+    console.error('❌ Failed to load M3U:', err);
   }
 }
 
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
-    const xml = await res.text();
-    const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
+
+    let xml;
+    if (EPG_URL.endsWith('.gz')) {
+      const buffer = await res.arrayBuffer();
+      const decompressed = zlib.gunzipSync(Buffer.from(buffer));
+      xml = decompressed.toString();
+    } else {
+      xml = await res.text();
+    }
+
+    const parser = new xml2js.Parser({ mergeAttrs: true });
+    const parsed = await parser.parseStringPromise(xml);
 
     epgData = {};
     for (const prog of parsed.tv.programme || []) {
@@ -77,15 +81,9 @@ async function loadEPG() {
       });
     }
 
-    // Filter EPG data to match loaded channels
-    const validIds = new Set(channels.map(c => c.tvgId));
-    Object.keys(epgData).forEach(key => {
-      if (!validIds.has(key)) delete epgData[key];
-    });
-
-    console.log(`🎯 Filtered EPG to ${Object.keys(epgData).length} matching channels.`);
+    console.log(`✅ EPG loaded: ${Object.keys(epgData).length} channels`);
   } catch (err) {
-    console.error('Failed to load EPG:', err);
+    console.error('❌ Failed to load EPG:', err);
   }
 }
 
