@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, Favorites, Filters, and Proxy Support
+// IPTV Addon for Stremio with EPG, Now/Next, and Proxy Support
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -173,27 +173,13 @@ app.get('/stream/:type/:id.json', (req, res) => {
 
   const index = parseInt(req.params.id.split(':')[1], 10);
   const channel = channels[index];
+
   if (!channel) return res.status(404).send('Channel not found');
 
-  // Stream through proxy fallback to help Smart TVs
-  const proxyUrl = `${req.protocol}://${req.headers.host}/proxy/${encodeURIComponent(channel.url)}`;
-
+  const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
   res.json({
-    streams: [{ title: channel.name, url: proxyUrl }]
+    streams: [{ title: channel.name, url: `${req.protocol}://${req.get('host')}${proxyUrl}` }]
   });
-});
-
-// Proxy endpoint to forward stream requests
-app.get('/proxy/:encodedUrl', async (req, res) => {
-  try {
-    const targetUrl = decodeURIComponent(req.params.encodedUrl);
-    const streamRes = await fetch(targetUrl);
-
-    res.set('Content-Type', streamRes.headers.get('content-type'));
-    streamRes.body.pipe(res);
-  } catch (err) {
-    res.status(500).send('Proxy error');
-  }
 });
 
 app.get('/favorites/:action/:id', (req, res) => {
@@ -202,6 +188,15 @@ app.get('/favorites/:action/:id', (req, res) => {
   else if (action === 'remove') favorites.delete(id);
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
+
+// Proxy route for Samsung TV compatibility
+app.use('/proxy', createProxyMiddleware({
+  target: '',
+  changeOrigin: true,
+  router: (req) => decodeURIComponent(req.url.slice(1)),
+  pathRewrite: (path, req) => '',
+  logLevel: 'silent'
+}));
 
 app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
