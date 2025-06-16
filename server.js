@@ -56,6 +56,10 @@ async function loadM3U() {
   }
 }
 
+const sax = require('sax');
+const zlib = require('zlib');
+const { Transform } = require('stream');
+
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
@@ -67,12 +71,26 @@ async function loadEPG() {
       stream = stream.pipe(zlib.createGunzip());
     }
 
+    // Sanitize any junk before <tv>
+    const cleanStream = stream.pipe(new Transform({
+      readableObjectMode: false,
+      transform(chunk, encoding, callback) {
+        const chunkStr = chunk.toString();
+        const idx = chunkStr.indexOf('<tv');
+        if (idx !== -1) {
+          this.push(chunkStr.slice(idx));
+        } else {
+          this.push('');
+        }
+        callback();
+      }
+    }));
+
     const parser = sax.createStream(true, {
       trim: true,
       normalize: true,
       xmlns: false,
-      // Raise buffer limits for large chunks
-      maxBufferLength: 16 * 1024 * 1024 // 16MB buffer
+      maxBufferLength: 16 * 1024 * 1024
     });
 
     let currentProgram = null;
@@ -87,15 +105,9 @@ async function loadEPG() {
           desc: '',
           category: ''
         };
-      } else if (currentProgram && node.name === 'title') {
-        currentProgram._collecting = 'title';
-        currentProgram.title = '';
-      } else if (currentProgram && node.name === 'desc') {
-        currentProgram._collecting = 'desc';
-        currentProgram.desc = '';
-      } else if (currentProgram && node.name === 'category') {
-        currentProgram._collecting = 'category';
-        currentProgram.category = '';
+      } else if (currentProgram && ['title', 'desc', 'category'].includes(node.name)) {
+        currentProgram._collecting = node.name;
+        currentProgram[node.name] = '';
       }
     });
 
@@ -124,17 +136,17 @@ async function loadEPG() {
 
     parser.on('error', err => {
       console.error('EPG Parsing error:', err);
-      stream.destroy();
+      cleanStream.destroy();
     });
 
-    stream.pipe(parser);
+    cleanStream.pipe(parser);
 
     await new Promise((resolve, reject) => {
       parser.on('end', resolve);
       parser.on('error', reject);
     });
 
-    console.log(`EPG parsing complete. Channels with EPG: ${Object.keys(epgData).length}`);
+    console.log(`✅ EPG loaded: ${Object.keys(epgData).length} channels`);
   } catch (err) {
     console.error('Failed to load EPG:', err);
   }
