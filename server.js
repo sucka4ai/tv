@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with EPG, Now/Next, and Proxy Support
+// IPTV Addon for Stremio with EPG, Now/Next, Proxy Support, and Lightweight Web UI
 
 const express = require('express');
 const fetch = require('node-fetch');
@@ -6,34 +6,29 @@ const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
-const { createProxyMiddleware } = require('http-proxy-middleware');
 const path = require('path');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const M3U_URL = process.env.M3U_URL || 'https://iptv-org.github.io/iptv/countries/gb.m3u';
+const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
 const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve the static frontend
+app.use('/ui', express.static(path.join(__dirname, 'public')));
 
 let channels = [];
-let epgData = {};
-let catalogsByGroup = {};
+let epgData = {}; // { tvg-id: [programs] }
+let catalogsByGroup = {}; // { group-title: [channels] }
 let favorites = new Set();
 
 async function loadM3U() {
   try {
     const res = await fetch(M3U_URL);
     const text = await res.text();
-
-    console.log('📥 Raw M3U length:', text.length);
-    if (!text.startsWith('#EXTM3U')) {
-      console.warn('⚠️ Not a valid M3U file. Does not start with #EXTM3U');
-    }
-
     const parsed = m3uParser.parse(text);
-    console.log('🧪 Parsed M3U items:', parsed.items.length);
 
     channels = parsed.items.map((item, index) => ({
       id: `iptv:${index}`,
@@ -65,11 +60,7 @@ async function loadEPG() {
   try {
     const res = await fetch(EPG_URL);
     const contentType = res.headers.get('content-type');
-
-    if (!contentType.includes('xml')) {
-      throw new Error(`Invalid content-type for EPG: ${contentType}`);
-    }
-
+    if (!contentType.includes('xml')) throw new Error(`Invalid content-type for EPG: ${contentType}`);
     const xml = await res.text();
     const parsed = await xml2js.parseStringPromise(xml, { mergeAttrs: true });
 
@@ -86,7 +77,7 @@ async function loadEPG() {
       });
     }
 
-    console.log(`✅ Loaded EPG data for ${Object.keys(epgData).length} channels.`);
+    console.log(`✅ EPG loaded: ${Object.keys(epgData).length} channels`);
   } catch (err) {
     console.error('❌ Failed to load EPG:', err);
   }
@@ -137,7 +128,7 @@ app.get('/manifest.json', (req, res) => {
     id: "com.iptv.addon",
     version: "3.0.0",
     name: "Full IPTV Addon",
-    description: "IPTV with EPG, now/next, search, filters, and favorites",
+    description: "IPTV with EPG, now/next, search, filters, favorites, and web UI",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -204,13 +195,16 @@ app.get('/favorites/:action/:id', (req, res) => {
   res.json({ status: 'ok', favorites: Array.from(favorites) });
 });
 
-// Proxy route for Samsung TV compatibility
 app.use('/proxy', createProxyMiddleware({
   target: '',
   changeOrigin: true,
-  router: req => decodeURIComponent(req.url.slice(1)),
+  router: (req) => decodeURIComponent(req.url.slice(1)),
   pathRewrite: (path, req) => '',
-  logLevel: 'silent'
+  logLevel: 'silent',
+  onError: (err, req, res) => {
+    console.error('Proxy error:', err.message);
+    res.status(500).send('Proxy failed.');
+  }
 }));
 
 app.listen(PORT, async () => {
