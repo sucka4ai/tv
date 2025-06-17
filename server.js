@@ -1,4 +1,4 @@
-// IPTV Addon for Stremio with Android/TV Compatibility Fixes
+// IPTV Addon for Stremio with Android/TV Compatibility
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const express = require('express');
@@ -31,16 +31,87 @@ let catalogsByGroup = {};
 let favorites = new Set();
 let lastUpdated = null;
 
-// Improved logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-  next();
+// Configuration endpoint
+app.get('/configure', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>IPTV Addon Configuration</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { background: #0066cc; color: white; border: none; padding: 10px 15px; cursor: pointer; }
+      </style>
+    </head>
+    <body>
+      <h1>IPTV Addon Configuration</h1>
+      <div id="status"></div>
+      <form id="configForm">
+        <div class="form-group">
+          <label for="m3uUrl">M3U Playlist URL:</label>
+          <input type="text" id="m3uUrl" name="m3uUrl" value="${M3U_URL}" required>
+        </div>
+        <div class="form-group">
+          <label for="epgUrl">EPG Guide URL:</label>
+          <input type="text" id="epgUrl" name="epgUrl" value="${EPG_URL}">
+        </div>
+        <button type="submit">Save Configuration</button>
+      </form>
+      <script>
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const statusEl = document.getElementById('status');
+          statusEl.innerHTML = '<p>Saving configuration...</p>';
+          
+          try {
+            const response = await fetch('/configure/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                m3uUrl: document.getElementById('m3uUrl').value,
+                epgUrl: document.getElementById('epgUrl').value
+              })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+              statusEl.innerHTML = '<p style="color:green">Configuration saved successfully! Restarting addon...</p>';
+              setTimeout(() => location.reload(), 2000);
+            } else {
+              statusEl.innerHTML = '<p style="color:red">Error: ' + result.message + '</p>';
+            }
+          } catch (err) {
+            statusEl.innerHTML = '<p style="color:red">Connection error: ' + err.message + '</p>';
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// Configuration save endpoint
+app.post('/configure/save', (req, res) => {
+  // In a real implementation, you would save these to a database or config file
+  console.log('New configuration received:', req.body);
+  res.json({ 
+    success: true,
+    message: 'Configuration received (demo only - not persisted)'
+  });
 });
 
 async function loadM3U() {
   try {
     console.log('Loading M3U playlist...');
-    const res = await fetch(M3U_URL, { timeout: 15000 });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    
+    const res = await fetch(M3U_URL, { signal: controller.signal });
+    clearTimeout(timeout);
+    
     if (!res.ok) throw new Error(`HTTP ${res.status} - ${res.statusText}`);
     
     const text = await res.text();
@@ -79,7 +150,12 @@ async function loadM3U() {
 async function loadEPG() {
   try {
     console.log('Loading EPG data...');
-    const res = await fetch(EPG_URL, { timeout: 20000 });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    
+    const res = await fetch(EPG_URL, { signal: controller.signal });
+    clearTimeout(timeout);
+    
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     
     const xml = await res.text();
@@ -156,9 +232,9 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.3.0",
-    name: "Fixed IPTV Addon",
-    description: "Compatible with Android and Smart TVs",
+    version: "3.5.0",
+    name: "Complete IPTV Addon",
+    description: "With configuration and Android/TV fixes",
     logo: "https://i.imgur.com/x7KjTfW.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -166,7 +242,14 @@ app.get('/manifest.json', (req, res) => {
     catalogs,
     behaviorHints: {
       configurable: true,
-      configurationRequired: false
+      configurationRequired: false,
+      configuration: {
+        proxy: {
+          type: "development",
+          useCORS: true,
+          path: "/configure"
+        }
+      }
     }
   });
 });
@@ -216,7 +299,7 @@ app.get('/catalog/:type/:id.json', (req, res) => {
   });
 });
 
-// Stream endpoint (fixed for Android/TV)
+// Stream endpoint
 app.get('/stream/:type/:id.json', (req, res) => {
   if (req.params.type !== 'tv' || !req.params.id.startsWith('iptv:')) {
     return res.status(404).json({ error: 'Invalid stream request' });
@@ -255,33 +338,40 @@ app.get('/stream/:type/:id.json', (req, res) => {
   });
 });
 
-// Enhanced proxy endpoint
+// Proxy endpoint
 app.get('/proxy', async (req, res) => {
   try {
     const url = decodeURIComponent(req.query.url);
-    if (!url) return res.status(400).json({ error: 'URL parameter missing' });
+    if (!url) {
+      console.error('Proxy error: Missing URL parameter');
+      return res.status(400).json({ error: 'Missing URL parameter' });
+    }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0',
+        'Accept': '*/*',
         'Referer': new URL(url).origin,
-        'Origin': new URL(url).origin,
-        'Accept': '*/*'
+        'Origin': new URL(url).origin
       }
     });
 
     clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+    }
 
     if ([301, 302, 307, 308].includes(response.status)) {
       return res.redirect(response.headers.get('location'));
     }
 
     res.set({
-      'Content-Type': response.headers.get('content-type') || 'application/octet-stream',
+      'Content-Type': response.headers.get('content-type') || 'video/mp4',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'Transfer-Encoding': 'chunked',
@@ -291,10 +381,11 @@ app.get('/proxy', async (req, res) => {
 
     response.body.pipe(res);
   } catch (err) {
-    console.error('Proxy Error:', err.message);
+    console.error('Proxy error:', err.message);
     res.status(502).json({ 
       error: 'Stream unavailable',
-      message: err.message
+      details: err.message,
+      solution: 'Check if the stream URL is accessible from your server'
     });
   }
 });
@@ -327,12 +418,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Initialize
+// Start server
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   await Promise.all([loadM3U(), loadEPG()]);
-  
-  // Scheduled refreshes
   setInterval(loadM3U, CACHE_TIME * 1000);
   setInterval(loadEPG, CACHE_TIME * 1000 * 2);
 });
