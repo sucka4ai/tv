@@ -343,49 +343,56 @@ app.get('/proxy', async (req, res) => {
   try {
     const url = decodeURIComponent(req.query.url);
     if (!url) {
-      console.error('Proxy error: Missing URL parameter');
       return res.status(400).json({ error: 'Missing URL parameter' });
     }
 
+    // Add these headers to bypass 403 errors
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': new URL(url).origin,
+      'Origin': new URL(url).origin,
+      'DNT': '1',
+      'Connection': 'keep-alive'
+    };
+
+    // Add timeout handling
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(url, {
+      headers,
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': '*/*',
-        'Referer': new URL(url).origin,
-        'Origin': new URL(url).origin
-      }
+      redirect: 'follow'
     });
 
     clearTimeout(timeout);
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-    }
-
+    // Handle redirects
     if ([301, 302, 307, 308].includes(response.status)) {
-      return res.redirect(response.headers.get('location'));
+      const location = response.headers.get('location');
+      if (location) {
+        return res.redirect(`/proxy?url=${encodeURIComponent(location)}`);
+      }
     }
 
+    // Set response headers
     res.set({
       'Content-Type': response.headers.get('content-type') || 'video/mp4',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Transfer-Encoding': 'chunked',
       'Access-Control-Allow-Origin': '*',
       'Accept-Ranges': 'bytes'
     });
 
+    // Pipe the stream
     response.body.pipe(res);
   } catch (err) {
-    console.error('Proxy error:', err.message);
+    console.error('Proxy Error:', err.message);
     res.status(502).json({ 
       error: 'Stream unavailable',
       details: err.message,
-      solution: 'Check if the stream URL is accessible from your server'
+      solution: 'The streaming server is blocking our requests. Try a different playlist.'
     });
   }
 });
