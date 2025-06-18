@@ -10,7 +10,7 @@ app.use(cors());
 
 const PORT = process.env.PORT || 10000;
 
-const M3U_URL = 'https://your-working-playlist-url.m3u';
+const M3U_URL = 'http://m3u4u.com/m3u/j67zn61w6guq5z8vyd1w';
 const EPG_URL = 'https://epg.pw/xmltv/epg_GB.xml';
 
 let channels = [];
