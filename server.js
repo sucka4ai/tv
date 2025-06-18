@@ -1,45 +1,36 @@
-// IPTV Addon for Stremio with Android/TV Compatibility
+// IPTV Addon for Stremio with Enhanced Proxy Support
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-
 const express = require('express');
 const m3uParser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const cors = require('cors');
 const dayjs = require('dayjs');
 const path = require('path');
+const { SocksProxyAgent } = require('socks-proxy-agent');
+const { HttpProxyAgent } = require('http-proxy-agent');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
 const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
 const CACHE_TIME = process.env.CACHE_TIME || 3600;
+const PROXY_URL = process.env.PROXY_URL || '';
+const FETCH_TIMEOUT = parseInt(process.env.FETCH_TIMEOUT) || 15000;
 
 // Enhanced User-Agent rotation
 const userAgents = [
-  // Chrome
+  'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36 DMOST/2.0.0',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  // Firefox
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0',
-  // Safari
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
-  // Mobile
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
   'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.210 Mobile Safari/537.36',
-  // Smart TV
-  'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36',
-  // VLC
   'VLC/3.0.18 LibVLC/3.0.18',
-  // Other common media players
-  'Kodi/20.3 (Windows NT 10.0; Win64; x64) App_Bitness/64 Version/20.3-(20.3.0)-Git:2023-10-01-8e58ecb'
+  'Kodi/20.3 (Windows NT 10.0; Win64; x64)'
 ];
 
 // Enhanced CORS configuration
 app.use(cors({
   origin: '*',
   methods: ['GET', 'HEAD', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Range', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Range', 'Accept', 'User-Agent', 'Referer', 'Origin'],
   exposedHeaders: ['Content-Length', 'Content-Range']
 }));
 
@@ -52,84 +43,27 @@ let catalogsByGroup = {};
 let favorites = new Set();
 let lastUpdated = null;
 
-// Configuration endpoint
-app.get('/configure', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>IPTV Addon Configuration</title>
-      <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { background: #0066cc; color: white; border: none; padding: 10px 15px; cursor: pointer; }
-      </style>
-    </head>
-    <body>
-      <h1>IPTV Addon Configuration</h1>
-      <div id="status"></div>
-      <form id="configForm">
-        <div class="form-group">
-          <label for="m3uUrl">M3U Playlist URL:</label>
-          <input type="text" id="m3uUrl" name="m3uUrl" value="${M3U_URL}" required>
-        </div>
-        <div class="form-group">
-          <label for="epgUrl">EPG Guide URL:</label>
-          <input type="text" id="epgUrl" name="epgUrl" value="${EPG_URL}">
-        </div>
-        <button type="submit">Save Configuration</button>
-      </form>
-      <script>
-        document.getElementById('configForm').addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const statusEl = document.getElementById('status');
-          statusEl.innerHTML = '<p>Saving configuration...</p>';
-          
-          try {
-            const response = await fetch('/configure/save', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                m3uUrl: document.getElementById('m3uUrl').value,
-                epgUrl: document.getElementById('epgUrl').value
-              })
-            });
-            
-            const result = await response.json();
-            if (result.success) {
-              statusEl.innerHTML = '<p style="color:green">Configuration saved successfully! Restarting addon...</p>';
-              setTimeout(() => location.reload(), 2000);
-            } else {
-              statusEl.innerHTML = '<p style="color:red">Error: ' + result.message + '</p>';
-            }
-          } catch (err) {
-            statusEl.innerHTML = '<p style="color:red">Connection error: ' + err.message + '</p>';
-          }
-        });
-      </script>
-    </body>
-    </html>
-  `);
-});
+// Proxy agent helper
+const getProxyAgent = (url) => {
+  if (!PROXY_URL) return null;
+  return PROXY_URL.startsWith('socks') ? 
+    new SocksProxyAgent(PROXY_URL) : 
+    new HttpProxyAgent(PROXY_URL);
+};
 
-// Configuration save endpoint
-app.post('/configure/save', (req, res) => {
-  console.log('New configuration received:', req.body);
-  res.json({ 
-    success: true,
-    message: 'Configuration received (demo only - not persisted)'
-  });
-});
-
+// Enhanced M3U loader
 async function loadM3U() {
   try {
     console.log('Loading M3U playlist...');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
     
-    const res = await fetch(M3U_URL, { signal: controller.signal });
+    const options = {
+      signal: controller.signal,
+      agent: getProxyAgent(M3U_URL)
+    };
+
+    const res = await fetch(M3U_URL, options);
     clearTimeout(timeout);
     
     if (!res.ok) throw new Error(`HTTP ${res.status} - ${res.statusText}`);
@@ -143,12 +77,13 @@ async function loadM3U() {
       id: `iptv:${index}`,
       name: item.name || `Channel ${index}`,
       description: item.tvg?.name || '',
-      logo: item.tvg?.logo || '',
+      logo: item.tvg?.logo || 'https://i.imgur.com/x7KjTfW.png',
       tvgId: item.tvg?.id || '',
       country: item.tvg?.country || 'Unknown',
       language: item.tvg?.language || 'Unknown',
       group: item.group?.title || 'Other',
-      url: item.url
+      url: item.url,
+      httpReferrer: item.url.startsWith('http') ? new URL(item.url).origin : null
     }));
 
     catalogsByGroup = {};
@@ -167,13 +102,19 @@ async function loadM3U() {
   }
 }
 
+// Enhanced EPG loader
 async function loadEPG() {
   try {
     console.log('Loading EPG data...');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
     
-    const res = await fetch(EPG_URL, { signal: controller.signal });
+    const options = {
+      signal: controller.signal,
+      agent: getProxyAgent(EPG_URL)
+    };
+
+    const res = await fetch(EPG_URL, options);
     clearTimeout(timeout);
     
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -252,9 +193,9 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.5.0",
-    name: "Complete IPTV Addon",
-    description: "With configuration and Android/TV fixes",
+    version: "4.1.0",
+    name: "Enhanced IPTV Addon",
+    description: "With proxy support and improved metadata",
     logo: "https://i.imgur.com/x7KjTfW.png",
     resources: ["catalog", "stream"],
     types: ["tv"],
@@ -274,7 +215,7 @@ app.get('/manifest.json', (req, res) => {
   });
 });
 
-// Catalog endpoint
+// Enhanced Catalog endpoint
 app.get('/catalog/:type/:id.json', (req, res) => {
   if (req.params.type !== 'tv') return res.status(404).json({ error: 'Invalid type' });
 
@@ -293,12 +234,15 @@ app.get('/catalog/:type/:id.json', (req, res) => {
       }
   }
 
-  const { search = '' } = req.query;
+  const { search = '', genre } = req.query;
   if (search) {
     filtered = filtered.filter(c => 
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.tvgId.toLowerCase().includes(search.toLowerCase())
     );
+  }
+  if (genre) {
+    filtered = filtered.filter(c => c.group === genre);
   }
 
   res.json({
@@ -308,11 +252,14 @@ app.get('/catalog/:type/:id.json', (req, res) => {
         id: c.id,
         type: 'tv',
         name: c.name,
-        poster: c.logo || 'https://i.imgur.com/x7KjTfW.png',
+        poster: c.logo,
+        posterShape: 'square',
+        background: c.logo,
+        logo: c.logo,
         description: current ? 
           `Now: ${current.title}\nNext: ${next?.title || 'N/A'}\n${current.desc || ''}` : 
           c.description,
-        genres: [c.group],
+        genres: [c.group, c.country].filter(Boolean),
         releaseInfo: `${c.country}${c.language ? ` (${c.language})` : ''}`
       };
     })
@@ -344,9 +291,9 @@ app.get('/stream/:type/:id.json', (req, res) => {
         proxyHeaders: {
           request: {
             'Accept': '*/*',
-            'User-Agent': 'Mozilla/5.0',
-            'Referer': new URL(channel.url).origin,
-            'Origin': new URL(channel.url).origin
+            'User-Agent': userAgents[0], // Default to Smart TV user agent
+            'Referer': channel.httpReferrer || 'https://www.google.com/',
+            'Origin': channel.httpReferrer || 'https://www.google.com/'
           }
         },
         http: {
@@ -358,75 +305,68 @@ app.get('/stream/:type/:id.json', (req, res) => {
   });
 });
 
-// Enhanced proxy endpoint with User-Agent rotation
+// Enhanced Proxy endpoint
 app.get('/proxy', async (req, res) => {
   try {
-    const url = decodeURIComponent(req.query.url);
+    let url = req.query.url || req.query.d;
     if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
+      const urlMatch = req.originalUrl.match(/d=([^&]+)/);
+      if (urlMatch) url = decodeURIComponent(urlMatch[1]);
+      else return res.status(400).json({ error: 'Missing URL parameter' });
     }
 
-    // Randomize headers for each request
+    url = decodeURIComponent(url);
+    if (!/^https?:\/\//i.test(url)) {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
     const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+    const referrer = req.query.h?.includes('Referer') ? 
+      req.query.h.split('Referer=')[1] : 
+      new URL(url).origin || 'https://www.google.com/';
+
     const headers = {
       'User-Agent': randomUserAgent,
       'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': new URL(url).origin || 'https://www.google.com/',
+      'Referer': referrer,
       'Origin': new URL(url).origin || 'https://www.google.com/',
-      'DNT': '1',
-      'Connection': 'keep-alive',
-      'Accept-Encoding': 'identity',
-      'Cache-Control': 'no-cache'
+      'Accept-Encoding': 'identity'
     };
 
-    // Enhanced timeout handling
+    // Add additional headers from Stremio
+    if (req.query.h) {
+      const headerParams = Array.isArray(req.query.h) ? req.query.h : [req.query.h];
+      headerParams.forEach(header => {
+        const [key, value] = header.split('=');
+        if (key && value) headers[key] = value;
+      });
+    }
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-      console.log(`Proxy timeout for URL: ${url}`);
-    }, 20000);
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
-    console.log(`Proxying URL: ${url} with User-Agent: ${randomUserAgent}`);
+    console.log(`Proxying to ${url} with User-Agent: ${randomUserAgent}`);
 
-    const response = await fetch(url, {
+    const options = {
       headers,
       signal: controller.signal,
       redirect: 'follow',
-      follow: 5
-    });
+      agent: getProxyAgent(url)
+    };
 
+    const response = await fetch(url, options);
     clearTimeout(timeout);
 
-    // Handle redirects
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get('location');
-      if (location) {
-        console.log(`Redirecting to: ${location}`);
-        return res.redirect(`/proxy?url=${encodeURIComponent(location)}`);
-      }
+      if (location) return res.redirect(`/proxy?url=${encodeURIComponent(location)}`);
     }
 
-    // Set response headers
-    const contentType = response.headers.get('content-type') || 
-                       (url.includes('.m3u8') ? 'application/vnd.apple.mpegurl' : 
-                       url.includes('.mpd') ? 'application/dash+xml' : 
-                       'video/mp4');
-
     res.set({
-      'Content-Type': contentType,
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Content-Type': response.headers.get('content-type') || 'video/mp4',
+      'Cache-Control': 'no-cache',
       'Access-Control-Allow-Origin': '*',
-      'Accept-Ranges': 'bytes',
       'Connection': 'keep-alive'
-    });
-
-    // Pipe the stream with error handling
-    response.body.on('error', (err) => {
-      console.error('Stream pipe error:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Stream error', details: err.message });
-      }
     });
 
     response.body.pipe(res);
@@ -440,6 +380,81 @@ app.get('/proxy', async (req, res) => {
       });
     }
   }
+});
+
+// Configuration endpoints (unchanged)
+app.get('/configure', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>IPTV Addon Configuration</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { background: #0066cc; color: white; border: none; padding: 10px 15px; cursor: pointer; }
+      </style>
+    </head>
+    <body>
+      <h1>IPTV Addon Configuration</h1>
+      <div id="status"></div>
+      <form id="configForm">
+        <div class="form-group">
+          <label for="m3uUrl">M3U Playlist URL:</label>
+          <input type="text" id="m3uUrl" name="m3uUrl" value="${M3U_URL}" required>
+        </div>
+        <div class="form-group">
+          <label for="epgUrl">EPG Guide URL:</label>
+          <input type="text" id="epgUrl" name="epgUrl" value="${EPG_URL}">
+        </div>
+        <div class="form-group">
+          <label for="proxyUrl">Proxy URL (optional):</label>
+          <input type="text" id="proxyUrl" name="proxyUrl" value="${PROXY_URL}" placeholder="socks:// or http://">
+        </div>
+        <button type="submit">Save Configuration</button>
+      </form>
+      <script>
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const statusEl = document.getElementById('status');
+          statusEl.innerHTML = '<p>Saving configuration...</p>';
+          
+          try {
+            const response = await fetch('/configure/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                m3uUrl: document.getElementById('m3uUrl').value,
+                epgUrl: document.getElementById('epgUrl').value,
+                proxyUrl: document.getElementById('proxyUrl').value
+              })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+              statusEl.innerHTML = '<p style="color:green">Configuration saved successfully! Restarting addon...</p>';
+              setTimeout(() => location.reload(), 2000);
+            } else {
+              statusEl.innerHTML = '<p style="color:red">Error: ' + result.message + '</p>';
+            }
+          } catch (err) {
+            statusEl.innerHTML = '<p style="color:red">Connection error: ' + err.message + '</p>';
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+app.post('/configure/save', (req, res) => {
+  console.log('New configuration received:', req.body);
+  res.json({ 
+    success: true,
+    message: 'Configuration received (demo only - not persisted)'
+  });
 });
 
 // Favorites endpoint
@@ -457,7 +472,8 @@ app.get('/status', (req, res) => {
     channels: channels.length,
     epgChannels: Object.keys(epgData).length,
     lastUpdated,
-    memoryUsage: process.memoryUsage()
+    memoryUsage: process.memoryUsage(),
+    proxy: PROXY_URL ? 'Configured' : 'Not configured'
   });
 });
 
@@ -474,6 +490,8 @@ app.use((err, req, res, next) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log('Available User-Agents:', userAgents.length);
+  if (PROXY_URL) console.log('Using proxy:', PROXY_URL);
+  
   await Promise.all([loadM3U(), loadEPG()]);
   setInterval(loadM3U, CACHE_TIME * 1000);
   setInterval(loadEPG, CACHE_TIME * 1000 * 2);
