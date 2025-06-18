@@ -1,17 +1,16 @@
 {
-  "name": "stremio-iptv-addon",
+  "name": "stremio-custom-iptv-addon",
   "version": "1.0.0",
-  "description": "Stremio custom IPTV addon with EPG and proxy",
+  "description": "A custom IPTV addon for Stremio with EPG support",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "axios": "^1.6.7",
     "express": "^4.18.2",
-    "node-fetch": "^2.6.9",
-    "socks-proxy-agent": "^7.0.0",
-    "http-proxy-agent": "^7.0.2",
-    "stremio-addon-sdk": "^1.0.0",
-    "xml2js": "^0.4.23"
+    "iptv-playlist-parser": "^0.10.0",
+    "stremio-addon-sdk": "^1.3.1",
+    "xml2js": "^0.6.2"
   }
 }
