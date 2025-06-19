@@ -15,6 +15,7 @@ let channels = [];
 let epgData = {};
 
 const parseM3U = async (url) => {
+  console.log('Loading M3U from:', url);
   const response = await axios.get(url);
   const lines = response.data.split('\n');
   const result = [];
@@ -31,13 +32,18 @@ const parseM3U = async (url) => {
       };
     } else if (line && !line.startsWith('#')) {
       current.url = line.trim();
-      result.push({ ...current });
+      if (current.name && current.url) {
+        result.push({ ...current });
+      }
     }
   }
+
+  console.log(`Parsed ${result.length} channels`);
   return result;
 };
 
 const parseEPG = async (url) => {
+  console.log('Loading EPG from:', url);
   const response = await axios.get(url);
   const parsed = await xml2js.parseStringPromise(response.data);
   const epg = {};
@@ -56,6 +62,7 @@ const parseEPG = async (url) => {
     }
   }
 
+  console.log(`Loaded EPG for ${Object.keys(epg).length} entries`);
   return epg;
 };
 
@@ -63,9 +70,9 @@ const loadData = async () => {
   try {
     channels = await parseM3U(M3U_URL);
     epgData = await parseEPG(EPG_URL);
-    console.log(`Loaded ${channels.length} channels and EPG for ${Object.keys(epgData).length} entries`);
+    console.log(`Loaded ${channels.length} channels and ${Object.keys(epgData).length} EPG entries`);
   } catch (err) {
-    console.error('Error loading data:', err.message);
+    console.error('❌ Error loading data:', err.message);
   }
 };
 
@@ -107,6 +114,7 @@ builder.defineCatalogHandler(({ type, id, extra }) => {
     genre: [c.group]
   }));
 
+  console.log(`Catalog handler returned ${metas.length} items`);
   return Promise.resolve({ metas });
 });
 
@@ -145,7 +153,6 @@ builder.defineMetaHandler(({ type, id }) => {
 
 const stremioInterface = builder.getInterface();
 
-// ✅ Manual route setup
 app.get('/manifest.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(stremioInterface.manifest);
@@ -155,19 +162,18 @@ app.get('/:resource/:type/:id.json', async (req, res) => {
   try {
     const { resource, type, id } = req.params;
     const args = { type, id, extra: req.query };
-
     const result = await stremioInterface.get(resource, args);
     res.setHeader('Content-Type', 'application/json');
     res.send(result);
   } catch (err) {
-    console.error(err);
+    console.error('❌ Error in handler:', err.message);
     res.status(500).send({ err: err.message });
   }
 });
 
-setInterval(loadData, 15 * 60 * 1000);
+setInterval(loadData, 15 * 60 * 1000); // Refresh every 15 minutes
 loadData();
 
 app.listen(PORT, () => {
-  console.log(`Addon server running on http://localhost:${PORT}`);
+  console.log(`✅ Addon server running on http://localhost:${PORT}`);
 });
