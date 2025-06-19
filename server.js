@@ -10,15 +10,28 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u';
-const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml';
+const M3U_URL = process.env.M3U_URL || 'https://your-playlist.m3u'; // MAKE SURE THESE ARE SET IN RENDER ENV VARS
+const EPG_URL = process.env.EPG_URL || 'https://epg.pw/xmltv/epg_GB.xml'; // MAKE SURE THESE ARE SET IN RENDER ENV VARS
 
 app.use(cors());
 
 let channels = [];
 let epgData = {}; // { tvg-id: [programs] }
-let catalogsByGroup = {}; // { group-title: [channels] }
+let catalogsByGroup = {}; // { group-title: [channels] } - keys will be safeGroup
 let favorites = new Set();
+
+// Function to make strings URL-safe and consistent for IDs
+function makeSafeId(str) {
+  return str
+    .toString()
+    .normalize('NFD') // Normalize Unicode characters
+    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+    .toLowerCase() // Convert to lowercase
+    .trim() // Trim whitespace from both ends
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .replace(/[^\w-]/g, ''); // Remove all non-word chars except hyphens
+}
+
 
 async function loadM3U() {
   try {
@@ -26,24 +39,31 @@ async function loadM3U() {
     const text = await res.text();
     const parsed = m3uParser.parse(text);
 
-    channels = parsed.items.map((item, index) => ({
-      id: `iptv:${index}`,
-      name: item.name || `Channel ${index}`,
-      description: item.tvg?.name || '',
-      logo: item.tvg?.logo || '',
-      tvgId: item.tvg?.id || '',
-      country: item.tvg?.country || 'Unknown',
-      language: item.tvg?.language || 'Unknown',
-      group: item.group?.title || 'Other',
-      url: item.url
-    }));
+    channels = parsed.items.map((item, index) => {
+      const groupTitle = item.group?.title || 'Other';
+      const safeGroup = makeSafeId(groupTitle); // Generate the safe ID for the group
+
+      return {
+        id: `iptv:${index}`, // This ID is internal and already safe
+        name: item.name || `Channel ${index}`,
+        description: item.tvg?.name || '',
+        logo: item.tvg?.logo || '',
+        tvgId: item.tvg?.id || '',
+        country: item.tvg?.country || 'Unknown',
+        language: item.tvg?.language || 'Unknown',
+        group: groupTitle, // Keep original group title for display if needed
+        safeGroup: safeGroup, // Store the safe version for catalog IDs and genre options
+        url: item.url
+      };
+    });
 
     catalogsByGroup = {};
     for (const channel of channels) {
-      if (!catalogsByGroup[channel.group]) {
-        catalogsByGroup[channel.group] = [];
+      // Use safeGroup as keys for catalogsByGroup
+      if (!catalogsByGroup[channel.safeGroup]) {
+        catalogsByGroup[channel.safeGroup] = [];
       }
-      catalogsByGroup[channel.group].push(channel);
+      catalogsByGroup[channel.safeGroup].push(channel);
     }
 
     console.log(`✅ Loaded ${channels.length} channels.`);
@@ -100,10 +120,10 @@ function getNowNext(tvgId) {
 }
 
 app.get('/manifest.json', (req, res) => {
-  const catalogs = Object.keys(catalogsByGroup).map(group => ({
+  const catalogs = Object.keys(catalogsByGroup).map(safeGroup => ({
     type: 'tv',
-    id: `iptv_${group.replace(/\s+/g, '_')}`,
-    name: `IPTV - ${group}`
+    id: `iptv_${safeGroup}`, // Use the safeGroup for the ID
+    name: `IPTV - ${safeGroup.replace(/_/g, ' ').toUpperCase()}` // You can format this for display
   }));
 
   catalogs.push({
@@ -112,7 +132,11 @@ app.get('/manifest.json', (req, res) => {
     name: 'IPTV - All Channels',
     extra: [
       { name: 'search', isRequired: false },
-      { name: 'genre', options: Object.keys(catalogsByGroup), isRequired: false },
+      {
+        name: 'genre',
+        options: Object.keys(catalogsByGroup).map(safeGroup => safeGroup.replace(/_/g, ' ').toUpperCase()), // Use safeGroup for display in options
+        isRequired: false
+      },
       { name: 'country', isRequired: false },
       { name: 'language', isRequired: false }
     ]
@@ -139,7 +163,8 @@ app.get('/manifest.json', (req, res) => {
 
 app.get('/catalog/:type/:id.json', (req, res) => {
   const { type, id } = req.params;
-  const { search = '', genre, country, language } = req.query;
+  const { search = '', genre, country, language } = req.query; // genre here will be the transformed string from options
+
   if (type !== 'tv') return res.status(404).send('Invalid type');
 
   let filtered = [];
@@ -148,12 +173,16 @@ app.get('/catalog/:type/:id.json', (req, res) => {
   } else if (id === 'iptv_favorites') {
     filtered = channels.filter(c => favorites.has(c.id));
   } else if (id.startsWith('iptv_')) {
-    const group = id.replace('iptv_', '').replace(/_/g, ' ');
-    filtered = catalogsByGroup[group] || [];
+    const requestedSafeGroup = id.replace('iptv_', ''); // The ID is now directly the safeGroup
+    filtered = catalogsByGroup[requestedSafeGroup] || [];
   }
 
   if (search) filtered = filtered.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-  if (genre) filtered = filtered.filter(c => c.group === genre);
+  // Filter by genre using the original group, but comparing against the safely transformed genre query param
+  if (genre) {
+      const safeGenreQuery = makeSafeId(genre); // Convert query param back to safe format for comparison
+      filtered = filtered.filter(c => c.safeGroup === safeGenreQuery);
+  }
   if (country) filtered = filtered.filter(c => c.country.toLowerCase().includes(country.toLowerCase()));
   if (language) filtered = filtered.filter(c => c.language.toLowerCase().includes(language.toLowerCase()));
 
@@ -165,7 +194,7 @@ app.get('/catalog/:type/:id.json', (req, res) => {
       name: c.name,
       poster: c.logo,
       description: current ? `${current.title} (Now)\nNext: ${next?.title || 'N/A'}` : c.description,
-      genres: [c.group]
+      genres: [c.group] // Keep original group for display in Stremio UI
     };
   });
 
@@ -211,7 +240,7 @@ app.use('/proxy', (req, res, next) => {
       'Referer': targetUrl
     },
     pathRewrite: () => '',
-    logLevel: 'silent'
+    logLevel: 'debug' // Changed to debug for more proxy insights
   })(req, res, next);
 });
 
