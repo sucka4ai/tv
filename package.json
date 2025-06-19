@@ -1,16 +1,17 @@
 {
   "name": "stremio-custom-iptv-addon",
   "version": "1.0.0",
+  "description": "Stremio addon for IPTV with categories and EPG",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "axios": "^1.6.8",
-    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
     "express": "^4.19.2",
-    "iptv-playlist-parser": "^0.5.0",
-    "stremio-addon-sdk": "1.6.10",
-    "xml2js": "^0.6.2"
+    "m3u8-parser": "^5.0.0",
+    "stremio-addon-sdk": "^0.11.0",
+    "xml2js": "^0.5.0"
   }
 }
