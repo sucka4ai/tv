@@ -143,10 +143,8 @@ builder.defineMetaHandler(({ type, id }) => {
   });
 });
 
-const stremioInterface = builder.getInterface();
-
-app.use('/manifest.json', (req, res) => res.json(stremioInterface.manifest));
-app.use('/:resource/:type/:id.json', stremioInterface.middleware());
+// ✅ Use full middleware with / addon base route
+app.use('/', builder.getInterface().getExpressMiddleware());
 
 setInterval(loadData, 15 * 60 * 1000);
 loadData();
