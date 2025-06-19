@@ -143,8 +143,27 @@ builder.defineMetaHandler(({ type, id }) => {
   });
 });
 
-// ✅ Use full middleware with / addon base route
-app.use('/', builder.getInterface().getExpressMiddleware());
+const stremioInterface = builder.getInterface();
+
+// ✅ Manual route setup
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(stremioInterface.manifest);
+});
+
+app.get('/:resource/:type/:id.json', async (req, res) => {
+  try {
+    const { resource, type, id } = req.params;
+    const args = { type, id, extra: req.query };
+
+    const result = await stremioInterface.get(resource, args);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ err: err.message });
+  }
+});
 
 setInterval(loadData, 15 * 60 * 1000);
 loadData();
