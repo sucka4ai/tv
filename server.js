@@ -1,4 +1,4 @@
-const { addonBuilder } = require('stremio-addon-sdk');
+const { addonBuilder, getRouter } = require('stremio-addon-sdk'); // Import getRouter
 const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
@@ -8,6 +8,10 @@ require('dotenv').config(); // Load environment variables from .env file
 const app = express();
 app.use(cors());
 
+// IMPORTANT: Ensure these are set in your environment or in a .env file
+// Example .env file:
+// M3U_URL="http://your-iptv-provider.com/playlist.m3u"
+// EPG_URL="http://your-iptv-provider.com/epg.xml"
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
 const PORT = process.env.PORT || 10000;
@@ -210,7 +214,7 @@ const builder = new addonBuilder({
 });
 
 builder.defineCatalogHandler(({ type, id, extra }) => {
-  // Add this console.log to see the exact type and id being received
+  // This log will now correctly show "tv" and "iptv_live" if the router works
   console.log(`[Catalog Handler] defineCatalogHandler invoked. Type: "${type}", ID: "${id}", Extra: ${JSON.stringify(extra)}`);
 
   if (type !== 'tv' || id !== 'iptv_live') {
@@ -331,35 +335,16 @@ builder.defineMetaHandler(({ type, id }) => {
   });
 });
 
-const stremioInterface = builder.getInterface();
+// Use the SDK's getRouter to handle all resource endpoints
+// This single line replaces all your app.get('/:resource/:type/:id.json', ...) routes
+app.use(getRouter(builder)); // This needs to be AFTER builder.define... calls
 
+// Keep the manifest route separate, as it's a direct file request
 app.get('/manifest.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   console.log('[Express] Manifest requested.');
-  res.send(stremioInterface.manifest);
-});
-
-// IMPORTANT FIX: A single, more robust route handler for all SDK resources.
-// This single handler should correctly parse all types of Stremio requests.
-app.get('/:resource/:type/:id/:extra?/:further_extra?.json', async (req, res) => {
-    try {
-        const { resource, type, id } = req.params;
-        // The `extra` data comes in `req.query` (e.g., ?genre=News&search=abc)
-        const args = { type, id, extra: req.query };
-
-        console.log(`[Express] Incoming Stremio request: /${resource}/${type}/${id}.json (or with extra). Full args: ${JSON.stringify(args)}`);
-
-        // The SDK's 'get' method is the universal entry point for all defined handlers (catalog, stream, meta)
-        // It intelligently dispatches based on the 'resource' argument.
-        const result = await stremioInterface.get(resource, args);
-
-        res.setHeader('Content-Type', 'application/json');
-        res.send(result);
-    } catch (err) {
-        console.error(`❌ [Express] Error handling Stremio resource request for /${req.params.resource}/${req.params.type}/${req.params.id}.json:`, err.message);
-        console.error('Error details:', err.stack); // Log full stack trace for better debugging
-        res.status(500).send({ err: err.message });
-    }
+  // builder.getInterface().manifest is the correct way to get the manifest object
+  res.send(builder.getInterface().manifest);
 });
 
 
