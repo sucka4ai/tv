@@ -9,7 +9,6 @@ app.use(cors());
 
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
-
 const PORT = process.env.PORT || 10000;
 
 let channels = [];
@@ -64,7 +63,7 @@ const loadData = async () => {
   try {
     channels = await parseM3U(M3U_URL);
     epgData = await parseEPG(EPG_URL);
-    console.log(`Loaded ${channels.length} channels and EPG for ${Object.keys(epgData).length} channels`);
+    console.log(`Loaded ${channels.length} channels and EPG for ${Object.keys(epgData).length} entries`);
   } catch (err) {
     console.error('Error loading data:', err.message);
   }
@@ -144,18 +143,13 @@ builder.defineMetaHandler(({ type, id }) => {
   });
 });
 
-// Refresh data every 15 mins
+const stremioInterface = builder.getInterface();
+
+app.use('/manifest.json', (req, res) => res.json(stremioInterface.manifest));
+app.use('/:resource/:type/:id.json', stremioInterface.middleware());
+
 setInterval(loadData, 15 * 60 * 1000);
 loadData();
-
-app.get('/manifest.json', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.send(builder.getInterface().getManifest());
-});
-
-app.get('/:resource/:type/:id.json', (req, res) => {
-  builder.getInterface().handle(req, res);
-});
 
 app.listen(PORT, () => {
   console.log(`Addon server running on http://localhost:${PORT}`);
