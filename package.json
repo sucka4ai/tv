@@ -19,7 +19,7 @@
     "axios": "^1.6.7",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "stremio-addon-sdk": "^1.1.14",
+    "stremio-addon-sdk": "^1.2.0",
     "xml2js": "^0.6.2",
     "dotenv": "^16.4.5"
   },
