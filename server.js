@@ -110,6 +110,9 @@ builder.defineCatalogHandler(({ type, id, extra }) => {
   return Promise.resolve({ metas });
 });
 
+console.log('Catalog request received:', { type, id, extra });
+console.log('Number of channels loaded:', channels.length);
+
 builder.defineStreamHandler(({ type, id }) => {
   const index = parseInt(id.replace('channel_', ''));
   const ch = channels[index];
