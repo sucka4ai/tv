@@ -1,17 +1,13 @@
-const { addonBuilder, getRouter } = require('stremio-addon-sdk'); // Import getRouter
+const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
 const xml2js = require('xml2js');
-require('dotenv').config(); // Load environment variables from .env file
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
 
-// IMPORTANT: Ensure these are set in your environment or in a .env file
-// Example .env file:
-// M3U_URL="http://your-iptv-provider.com/playlist.m3u"
-// EPG_URL="http://your-iptv-provider.com/epg.xml"
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
 const PORT = process.env.PORT || 10000;
@@ -19,7 +15,6 @@ const PORT = process.env.PORT || 10000;
 let channels = [];
 let epgData = {};
 
-// Helper to extract attributes from EXTINF line
 const extractExtinfAttributes = (line) => {
   const attributes = {};
   const regex = /(\S+?)="([^"]*?)"/g;
@@ -210,11 +205,12 @@ const builder = new addonBuilder({
       extra: [{ name: 'search' }, { name: 'genre' }]
     }
   ],
-  resources: ['catalog', 'stream', 'meta']
+  resources: ['catalog', 'stream', 'meta'],
+  // ADD THIS LINE: Explicitly provide an empty config array
+  config: []
 });
 
 builder.defineCatalogHandler(({ type, id, extra }) => {
-  // This log will now correctly show "tv" and "iptv_live" if the router works
   console.log(`[Catalog Handler] defineCatalogHandler invoked. Type: "${type}", ID: "${id}", Extra: ${JSON.stringify(extra)}`);
 
   if (type !== 'tv' || id !== 'iptv_live') {
@@ -335,23 +331,42 @@ builder.defineMetaHandler(({ type, id }) => {
   });
 });
 
+// --- DEBUGGING LOGS START ---
+console.log('--- Debugging Builder and Manifest ---');
+console.log('Builder object exists:', !!builder);
+try {
+    const debugInterface = builder.getInterface();
+    console.log('Builder Interface exists:', !!debugInterface);
+    const manifestForDebug = debugInterface.manifest;
+    console.log('Manifest object is:', manifestForDebug ? 'Defined' : 'Undefined');
+    if (manifestForDebug) {
+        console.log('Manifest Content:', JSON.stringify(manifestForDebug, null, 2));
+        console.log('Manifest.config property:', manifestForDebug.config ? 'Defined' : 'Undefined');
+        if (manifestForDebug.config) {
+            console.log('Manifest.config length:', manifestForDebug.config.length);
+        }
+    }
+} catch (e) {
+    console.error('Error during manifest debugging:', e.message);
+}
+console.log('--- End Debugging ---');
+// --- DEBUGGING LOGS END ---
+
+
 // Use the SDK's getRouter to handle all resource endpoints
-// This single line replaces all your app.get('/:resource/:type/:id.json', ...) routes
-app.use(getRouter(builder)); // This needs to be AFTER builder.define... calls
+app.use(getRouter(builder));
 
 // Keep the manifest route separate, as it's a direct file request
 app.get('/manifest.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   console.log('[Express] Manifest requested.');
-  // builder.getInterface().manifest is the correct way to get the manifest object
   res.send(builder.getInterface().manifest);
 });
 
 
 // Initial data load when the server starts
 loadData();
-// Refresh data every 15 minutes (convert to milliseconds: 15 minutes * 60 seconds/minute * 1000 ms/second)
-setInterval(loadData, 15 * 60 * 1000);
+setInterval(loadData, 15 * 60 * 1000); // Refresh data every 15 minutes
 
 app.listen(PORT, () => {
   console.log(`✅ Addon server running on http://localhost:${PORT}`);
