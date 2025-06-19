@@ -50,7 +50,7 @@ const parseM3U = async (url) => {
       let line = lines[i].trim();
 
       if (line.startsWith('#EXTINF')) {
-        console.log(`[M3U Parser] Processing EXTINF line (${i+1}): ${line}`);
+        // console.log(`[M3U Parser] Processing EXTINF line (${i+1}): ${line}`); // Very verbose, uncomment if needed
 
         const attributes = extractExtinfAttributes(line);
         const nameMatch = line.match(/,(.*)$/); // Get everything after the last comma
@@ -61,15 +61,15 @@ const parseM3U = async (url) => {
           tvgId: attributes['tvg-id'] || null, // Capture tvg-id for potential EPG linking
           tvgLogo: attributes['tvg-logo'] || null // Capture tvg-logo for poster
         };
-        console.log(`[M3U Parser] Extracted: Name="${current.name}", Group="${current.group}", tvgId="${current.tvgId}"`);
+        // console.log(`[M3U Parser] Extracted: Name="${current.name}", Group="${current.group}", tvgId="${current.tvgId}"`); // Very verbose, uncomment if needed
       } else if (line && !line.startsWith('#')) {
         // This line is expected to be the URL
         current.url = line.trim();
-        console.log(`[M3U Parser] Found URL for current channel (${current.name}): ${current.url}`);
+        // console.log(`[M3U Parser] Found URL for current channel (${current.name}): ${current.url}`); // Very verbose, uncomment if needed
 
         if (current.name && current.url) {
           result.push({ ...current });
-          console.log(`[M3U Parser] Added channel: ${current.name}`);
+          // console.log(`[M3U Parser] Added channel: ${current.name}`); // Very verbose, uncomment if needed
         } else {
           console.warn(`[M3U Parser] Skipping incomplete channel (name: ${current.name}, url: ${current.url})`);
         }
@@ -153,9 +153,10 @@ const parseEPG = async (url) => {
   }
 };
 
-const getNowAndNextProgram = (channelId) => {
+const getNowAndNextProgram = (channelIdentifier) => {
     const now = new Date();
-    const programs = epgData[channelId];
+    // Prioritize lookup by tvg-id if available in EPG, otherwise fallback to channel name
+    const programs = epgData[channelIdentifier];
     if (!programs || programs.length === 0) {
         return { now: null, next: null };
     }
@@ -237,24 +238,32 @@ builder.defineCatalogHandler(({ type, id, extra }) => {
   }
 
   console.log(`[Catalog Handler] Request received. Extra: ${JSON.stringify(extra)}`);
-  console.log(`[Catalog Handler] Total channels available: ${channels.length}`);
+  console.log(`[Catalog Handler] Total channels available (before filtering): ${channels.length}`);
 
   let filtered = channels;
 
+  // IMPORTANT: The genre filter from Stremio sends the genre string as it appears in the dropdown.
+  // It's good practice to make both the filter value and the channel group lowercase for comparison.
   if (extra?.genre) {
     const genre = extra.genre.toLowerCase();
+    console.log(`[Catalog Handler] Applying genre filter: "${genre}"`);
     filtered = filtered.filter(c => c.group?.toLowerCase() === genre);
-    console.log(`[Catalog Handler] Filtered by genre "${genre}": ${filtered.length} channels`);
+    console.log(`[Catalog Handler] Channels after genre filter: ${filtered.length}`);
   }
 
   if (extra?.search) {
     const searchTerm = extra.search.toLowerCase();
+    console.log(`[Catalog Handler] Applying search filter: "${searchTerm}"`);
     filtered = filtered.filter(c => c.name.toLowerCase().includes(searchTerm));
-    console.log(`[Catalog Handler] Filtered by search "${searchTerm}": ${filtered.length} channels`);
+    console.log(`[Catalog Handler] Channels after search filter: ${filtered.length}`);
   }
 
+  console.log(`[Catalog Handler] Final filtered channels count (before map): ${filtered.length}`);
+
   const metas = filtered.map((c, i) => {
-    const programInfo = getNowAndNextProgram(c.tvgId || c.name); // Try tvgId first, then name
+    // Determine the identifier for EPG lookup: tvgId from M3U or channel name
+    const epgIdentifier = c.tvgId || c.name;
+    const programInfo = getNowAndNextProgram(epgIdentifier);
     let description = `Live stream from group: ${c.group}`;
     let name = c.name;
 
@@ -268,14 +277,17 @@ builder.defineCatalogHandler(({ type, id, extra }) => {
     }
 
     return {
-      id: 'channel_' + i, // Use index as ID, ensures uniqueness for this session
+      // Use a more robust ID based on channel properties to prevent issues if channel order changes
+      // or if you ever reload data and indexes shift. Using a hash or a unique identifier from M3U
+      // is ideal. For now, we'll keep 'channel_' + i, but be aware of this for very dynamic M3U.
+      id: 'channel_' + i,
       name: name,
       type: 'tv',
       poster: c.tvgLogo || 'https://img.icons8.com/color/96/000000/retro-tv.png', // Use tvg-logo if available
-      genres: [c.group],
+      genres: [c.group], // Stremio uses this to build the genre filter list
       description: description,
-      // background: c.tvgLogo, // Can also use for background image
-      // logo: c.tvgLogo // Can also use for logo
+      // background: c.tvgLogo, // Can also use for background image in detail screen
+      // logo: c.tvgLogo // Can also use for logo in detail screen
     };
   });
 
@@ -293,7 +305,8 @@ builder.defineStreamHandler(({ type, id }) => {
     return Promise.resolve({ streams: [] });
   }
 
-  const programInfo = getNowAndNextProgram(ch.tvgId || ch.name);
+  const epgIdentifier = ch.tvgId || ch.name;
+  const programInfo = getNowAndNextProgram(epgIdentifier);
   let streamTitle = ch.name;
   if (programInfo.now) {
       streamTitle = `${ch.name} - Now: ${programInfo.now.title}`;
@@ -301,15 +314,11 @@ builder.defineStreamHandler(({ type, id }) => {
       streamTitle = `${ch.name} - Next: ${programInfo.next.title}`;
   }
 
-
   console.log(`[Stream Handler] Providing stream for "${ch.name}" from URL: ${ch.url}`);
   return Promise.resolve({
     streams: [{
       title: streamTitle,
-      url: ch.url,
-      // You can also add more info here like:
-      // name: ch.name,
-      // description: 'Live stream'
+      url: ch.url
     }]
   });
 });
@@ -324,7 +333,8 @@ builder.defineMetaHandler(({ type, id }) => {
     return Promise.resolve({ meta: null });
   }
 
-  const programInfo = getNowAndNextProgram(ch.tvgId || ch.name);
+  const epgIdentifier = ch.tvgId || ch.name;
+  const programInfo = getNowAndNextProgram(epgIdentifier);
   let description = `Live stream from group: ${ch.group}`;
   if (programInfo.now) {
     description = `Currently: ${programInfo.now.title}\n${programInfo.now.description || ''}\n${description}`;
@@ -343,9 +353,7 @@ builder.defineMetaHandler(({ type, id }) => {
       name: ch.name,
       description: description,
       genres: [ch.group],
-      poster: ch.tvgLogo || 'https://img.icons8.com/color/96/000000/retro-tv.png',
-      // background: ch.tvgLogo, // Can add a larger image
-      // logo: ch.tvgLogo // Can add a smaller logo
+      poster: ch.tvgLogo || 'https://img.icons8.com/color/96/000000/retro-tv.png'
     }
   });
 });
@@ -365,8 +373,13 @@ app.get('/:resource/:type/:id.json', async (req, res) => {
         const args = { type, id, extra: req.query };
         console.log(`[Express] Request for /${resource}/${type}/${id}.json with args: ${JSON.stringify(args)}`);
 
-        // Check if the resource handler exists
-        if (stremioInterface[resource]) {
+        // Correctly route to SDK handlers
+        if (resource === 'catalog') {
+            const result = await stremioInterface.get(resource, args);
+            res.setHeader('Content-Type', 'application/json');
+            res.send(result);
+        } else if (resource === 'stream' || resource === 'meta') {
+            // For 'stream' and 'meta', the SDK uses direct function calls on the interface
             const result = await stremioInterface[resource](args);
             res.setHeader('Content-Type', 'application/json');
             res.send(result);
@@ -381,13 +394,19 @@ app.get('/:resource/:type/:id.json', async (req, res) => {
 });
 
 // Handle requests with extra parameters (like genre/search)
+// This route handles cases like /catalog/tv/iptv_live/genre=News.json
 app.get('/:resource/:type/:id/:extra?.json', async (req, res) => {
     try {
         const { resource, type, id } = req.params;
         const args = { type, id, extra: req.query }; // Query parameters are in req.query
         console.log(`[Express] Request for /${resource}/${type}/${id}/:extra.json with args: ${JSON.stringify(args)}`);
 
-        if (stremioInterface[resource]) {
+        // Correctly route to SDK handlers
+        if (resource === 'catalog') {
+            const result = await stremioInterface.get(resource, args);
+            res.setHeader('Content-Type', 'application/json');
+            res.send(result);
+        } else if (resource === 'stream' || resource === 'meta') {
             const result = await stremioInterface[resource](args);
             res.setHeader('Content-Type', 'application/json');
             res.send(result);
