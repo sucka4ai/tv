@@ -21,8 +21,8 @@ const manifest = {
     catalogs: [],
 };
 
-const IPTV_URL = "https://your-m3u-url.m3u"; // Replace with your actual M3U URL
-const EPG_URL = "https://your-epg-url.xml";  // Replace with your actual EPG XML URL
+const IPTV_URL = "https://m3u4u.com/m3u/j67zn61w6guq5z8vyd1w"; // Replace with your actual M3U URL
+const EPG_URL = "https://epg.pw/xmltv/epg_GB.xml";  // Replace with your actual EPG XML URL
 
 let channels = [];
 let epg = {};
