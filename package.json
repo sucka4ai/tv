@@ -1,18 +1,32 @@
 {
-  "name": "stremio-hls-test-addon",
+  "name": "stremio-iptv-addon",
   "version": "1.0.0",
-  "description": "A minimal Stremio HLS test addon",
+  "description": "A custom IPTV addon for Stremio with EPG, now/next info, favorites, filters, and proxy support.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": ["stremio", "addon", "hls", "test"],
-  "author": "Your Name",
-  "license": "MIT",
   "dependencies": {
-    "stremio-addon-sdk": "^1.3.0"
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^2.0.6",
+    "iptv-playlist-parser": "^0.7.0",
+    "node-fetch": "^2.6.12",
+    "stremio-addon-sdk": "^1.6.8",
+    "xml2js": "^0.4.23"
   },
   "engines": {
     "node": "20.x"
-  }
+  },
+  "keywords": [
+    "iptv",
+    "stremio",
+    "addon",
+    "epg",
+    "m3u",
+    "proxy"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
