@@ -159,7 +159,7 @@ app.get('/manifest.json', (req, res) => {
 
   res.json({
     id: "com.iptv.addon",
-    version: "3.0.0",
+    version: "3.0.0", // Increment version for Stremio to pick up changes
     name: "Full IPTV Addon",
     description: "IPTV with EPG, now/next, search, filters, and favorites",
     logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/TV-icon-2.svg/1024px-TV-icon-2.svg.png",
@@ -249,7 +249,14 @@ app.get('/stream/:type/:id.json', (req, res) => {
   const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
   console.log(`Streaming channel ${channel.name} via proxy: ${proxyUrl}`);
   res.json({
-    streams: [{ title: channel.name, url: `${req.protocol}://${req.get('host')}${proxyUrl}` }]
+    streams: [{
+      title: channel.name,
+      url: `${req.protocol}://${req.get('host')}${proxyUrl}`,
+      // ADDED: behaviorHints from the test addon for better compatibility
+      behaviorHints: {
+        notWebReady: false
+      }
+    }]
   });
 });
 
