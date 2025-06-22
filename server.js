@@ -12,21 +12,11 @@ const EPG_URL = process.env.EPG_URL;
 const app = express();
 app.use(cors());
 
-const builder = new addonBuilder({
-  id: 'iptv-addon',
-  version: '1.0.0',
-  name: 'IPTV Addon',
-  description: 'Custom IPTV Addon with M3U and EPG support',
-  resources: ['catalog', 'stream', 'meta'],
-  types: ['tv'],
-  catalogs: [],
-  idPrefixes: ['iptv_']
-});
-
 // Globals
 let playlist = [];
 let epg = {};
 let categories = [];
+let catalogs = []; // <== build this first
 
 async function fetchPlaylist() {
   try {
@@ -35,7 +25,6 @@ async function fetchPlaylist() {
     const parsed = parser.parse(text);
     playlist = parsed.items;
 
-    // Extract categories
     const catSet = new Set();
     for (const item of playlist) {
       const group = item.group.title || 'Uncategorized';
@@ -43,10 +32,9 @@ async function fetchPlaylist() {
     }
 
     categories = Array.from(catSet).sort();
-    categories.unshift('All Channels'); // Ensure "All Channels" comes first
+    categories.unshift('All Channels');
 
-    // Update catalogs
-    builder.manifest.catalogs = categories.map(cat => ({
+    catalogs = categories.map(cat => ({
       type: 'tv',
       id: `iptv_${cat.toLowerCase().replace(/\s+/g, '_')}`,
       name: cat
@@ -87,62 +75,72 @@ async function fetchEPG() {
   }
 }
 
-builder.defineCatalogHandler(({ id }) => {
-  const category = id.replace(/^iptv_/, '').replace(/_/g, ' ');
-  const items = playlist.filter(item =>
-    category === 'All Channels' || item.group.title === category
-  ).map(item => {
-    const current = epg[item.tvg.id];
-    return {
-      id: `iptv_${encodeURIComponent(item.tvg.id || item.name)}`,
-      type: 'tv',
-      name: item.name,
-      poster: item.tvg.logo || null,
-      description: current ? `${current.title} (${current.start} - ${current.stop})` : 'Live Channel'
-    };
-  });
-
-  return Promise.resolve({ metas: items });
-});
-
-builder.defineMetaHandler(({ id }) => {
-  const decodedId = decodeURIComponent(id.replace(/^iptv_/, ''));
-  const item = playlist.find(ch =>
-    ch.tvg.id === decodedId || ch.name === decodedId
-  );
-  const current = epg[item?.tvg.id];
-  return Promise.resolve({
-    meta: {
-      id,
-      type: 'tv',
-      name: item?.name || 'Unknown Channel',
-      description: current ? `${current.title}\n${current.desc}` : 'Live Channel',
-      poster: item?.tvg.logo || null
-    }
-  });
-});
-
-builder.defineStreamHandler(({ id }) => {
-  const decodedId = decodeURIComponent(id.replace(/^iptv_/, ''));
-  const item = playlist.find(ch =>
-    ch.tvg.id === decodedId || ch.name === decodedId
-  );
-  if (!item) return Promise.resolve({ streams: [] });
-
-  return Promise.resolve({
-    streams: [
-      {
-        title: item.name,
-        url: item.url
-      }
-    ]
-  });
-});
-
-// Initialize and run
 (async () => {
   await fetchPlaylist();
   await fetchEPG();
+
+  const builder = new addonBuilder({
+    id: 'iptv-addon',
+    version: '1.0.0',
+    name: 'IPTV Addon',
+    description: 'Custom IPTV Addon with M3U and EPG support',
+    resources: ['catalog', 'stream', 'meta'],
+    types: ['tv'],
+    catalogs: catalogs,
+    idPrefixes: ['iptv_']
+  });
+
+  builder.defineCatalogHandler(({ id }) => {
+    const category = id.replace(/^iptv_/, '').replace(/_/g, ' ');
+    const items = playlist.filter(item =>
+      category === 'All Channels' || item.group.title === category
+    ).map(item => {
+      const current = epg[item.tvg.id];
+      return {
+        id: `iptv_${encodeURIComponent(item.tvg.id || item.name)}`,
+        type: 'tv',
+        name: item.name,
+        poster: item.tvg.logo || null,
+        description: current ? `${current.title} (${current.start} - ${current.stop})` : 'Live Channel'
+      };
+    });
+
+    return Promise.resolve({ metas: items });
+  });
+
+  builder.defineMetaHandler(({ id }) => {
+    const decodedId = decodeURIComponent(id.replace(/^iptv_/, ''));
+    const item = playlist.find(ch =>
+      ch.tvg.id === decodedId || ch.name === decodedId
+    );
+    const current = epg[item?.tvg.id];
+    return Promise.resolve({
+      meta: {
+        id,
+        type: 'tv',
+        name: item?.name || 'Unknown Channel',
+        description: current ? `${current.title}\n${current.desc}` : 'Live Channel',
+        poster: item?.tvg.logo || null
+      }
+    });
+  });
+
+  builder.defineStreamHandler(({ id }) => {
+    const decodedId = decodeURIComponent(id.replace(/^iptv_/, ''));
+    const item = playlist.find(ch =>
+      ch.tvg.id === decodedId || ch.name === decodedId
+    );
+    if (!item) return Promise.resolve({ streams: [] });
+
+    return Promise.resolve({
+      streams: [
+        {
+          title: item.name,
+          url: item.url
+        }
+      ]
+    });
+  });
 
   const addonInterface = builder.getInterface();
   app.use('/stremio/v1', getRouter(addonInterface));
