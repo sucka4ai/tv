@@ -7,13 +7,13 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@stremio/sdk": "^1.5.0",
     "cors": "^2.8.5",
     "dayjs": "^1.11.9",
     "express": "^4.18.2",
     "http-proxy-middleware": "^2.0.6",
     "iptv-playlist-parser": "^0.5.0",
     "node-fetch": "^2.6.9",
+    "stremio-addon-sdk": "^0.20.2",
     "xml2js": "^0.6.2"
   },
   "engines": {
