@@ -1,96 +1,183 @@
-const { addonBuilder } = require("stremio-addon-sdk");
-const fetch = require("node-fetch");
-const { parse } = require("iptv-playlist-parser");
-const xml2js = require("xml2js");
-const dayjs = require("dayjs");
+const { addonBuilder } = require('stremio-addon-sdk');
+const fetch = require('node-fetch');
+const { parse } = require('iptv-playlist-parser');
+const xml2js = require('xml2js');
+const dayjs = require('dayjs');
+const express = require('express');
+const { createProxyMiddleware } = require('http-proxy-middleware');
+const cors = require('cors');
 
-const M3U_URL = "http://m3u4u.com/m3u/j67zn61w6guq5z8vyd1w"; 
-const EPG_URL = "https://epg.pw/xmltv/epg_GB.xml"; 
+const app = express();
+app.use(cors());
+
+// === CONFIGURATION ===
+const M3U_URL = 'https://example.com/playlist.m3u';
+const EPG_URL = 'https://example.com/epg.xml';
+const PROXY_PREFIX = '/proxy/';
+const ADDON_ID = 'org.myaddon.iptv';
+const ADDON_NAME = 'My IPTV Addon';
 
 let channels = [];
-let epgData = {};
+let epg = {};
 
-// Load playlist and EPG
-async function loadData() {
-  try {
-    const m3uRes = await fetch(M3U_URL);
-    const m3uText = await m3uRes.text();
-    channels = parse(m3uText).items;
-
-    const epgRes = await fetch(EPG_URL);
-    const epgText = await epgRes.text();
-    epgData = await xml2js.parseStringPromise(epgText);
-
-    console.log(`Loaded ${channels.length} channels and EPG`);
-  } catch (e) {
-    console.error("Failed to load data", e);
-  }
+async function loadM3U() {
+    try {
+        const res = await fetch(M3U_URL);
+        const text = await res.text();
+        const parsed = parse(text);
+        channels = parsed.items.map((item, index) => ({
+            id: `iptv_${index}`,
+            name: item.name,
+            url: item.url,
+            logo: item.tvg.logo || null,
+            group: item.group.title || 'Other'
+        }));
+        console.log(`Loaded ${channels.length} channels`);
+    } catch (err) {
+        console.error('Error loading M3U:', err);
+    }
 }
 
-loadData();
-setInterval(loadData, 15 * 60 * 1000); // refresh every 15 mins
+async function loadEPG() {
+    try {
+        const res = await fetch(EPG_URL);
+        const xml = await res.text();
+        const result = await xml2js.parseStringPromise(xml);
+        const guide = result.tv.programme;
+        epg = {};
 
-const builder = new addonBuilder({
-  id: "org.iptv.custom",
-  version: "1.0.0",
-  name: "Custom IPTV",
-  description: "Live IPTV with M3U and EPG",
-  types: ["tv"],
-  resources: ["catalog", "stream", "meta"],
-  catalogs: [
-    {
-      type: "tv",
-      id: "iptv_catalog",
-      name: "IPTV Live TV"
+        guide.forEach(prog => {
+            const channelId = prog.$.channel;
+            if (!epg[channelId]) epg[channelId] = [];
+            epg[channelId].push({
+                title: prog.title?.[0]?._ || '',
+                desc: prog.desc?.[0]?._ || '',
+                start: prog.$.start,
+                stop: prog.$.stop
+            });
+        });
+
+        console.log(`Loaded EPG for ${Object.keys(epg).length} channels`);
+    } catch (err) {
+        console.error('Error loading EPG:', err);
     }
-  ]
+}
+
+function getNowNext(channelName) {
+    const now = dayjs();
+    const channelEPG = epg[channelName] || [];
+
+    let current = null;
+    let next = null;
+
+    for (let i = 0; i < channelEPG.length; i++) {
+        const prog = channelEPG[i];
+        const start = dayjs(prog.start, 'YYYYMMDDHHmmss Z');
+        const stop = dayjs(prog.stop, 'YYYYMMDDHHmmss Z');
+
+        if (now.isAfter(start) && now.isBefore(stop)) {
+            current = prog;
+            next = channelEPG[i + 1] || null;
+            break;
+        }
+    }
+
+    return { current, next };
+}
+
+// === ADDON BUILDER ===
+const builder = new addonBuilder({
+    id: ADDON_ID,
+    version: '1.0.0',
+    name: ADDON_NAME,
+    description: 'Streams IPTV with EPG support',
+    catalogs: [{
+        type: 'tv',
+        id: 'iptv_catalog',
+        name: 'Live TV',
+        extra: [{ name: 'search' }, { name: 'genre' }]
+    }],
+    resources: ['catalog', 'stream', 'meta'],
+    types: ['tv']
 });
 
-// Catalog
-builder.defineCatalogHandler(({ type, id }) => {
-  if (type !== "tv" || id !== "iptv_catalog") return Promise.resolve({ metas: [] });
+builder.defineCatalogHandler(({ extra }) => {
+    let filtered = channels;
+    if (extra.genre) {
+        filtered = channels.filter(ch => ch.group === extra.genre);
+    }
 
-  const metas = channels.map((ch) => ({
-    id: Buffer.from(ch.url).toString("base64"),
-    type: "tv",
-    name: ch.name || "Untitled",
-    poster: ch.tvg.logo || null
-  }));
+    const metas = filtered.map(ch => {
+        const { current, next } = getNowNext(ch.name);
+        return {
+            id: ch.id,
+            type: 'tv',
+            name: ch.name,
+            poster: ch.logo,
+            background: ch.logo,
+            description: current ? `Now: ${current.title} - Next: ${next?.title || 'N/A'}` : 'Live Channel',
+            genres: [ch.group]
+        };
+    });
 
-  return Promise.resolve({ metas });
+    return Promise.resolve({ metas });
 });
 
-// Meta
-builder.defineMetaHandler(({ id }) => {
-  const url = Buffer.from(id, "base64").toString();
-  const channel = channels.find((c) => c.url === url);
-  if (!channel) return Promise.resolve({ meta: null });
-
-  const meta = {
-    id,
-    type: "tv",
-    name: channel.name,
-    poster: channel.tvg.logo || null,
-    description: `Live channel: ${channel.name}`
-  };
-
-  return Promise.resolve({ meta });
-});
-
-// Stream
 builder.defineStreamHandler(({ id }) => {
-  const url = Buffer.from(id, "base64").toString();
-  const stream = channels.find((c) => c.url === url);
-  if (!stream) return Promise.resolve({ streams: [] });
+    const channel = channels.find(ch => ch.id === id);
+    if (!channel) return Promise.resolve({ streams: [] });
 
-  return Promise.resolve({
-    streams: [
-      {
-        title: stream.name,
-        url: stream.url
-      }
-    ]
-  });
+    const streamUrl = `${PROXY_PREFIX}${encodeURIComponent(channel.url)}`;
+
+    return Promise.resolve({
+        streams: [{
+            title: channel.name,
+            url: streamUrl
+        }]
+    });
 });
 
-module.exports = builder.getInterface();
+builder.defineMetaHandler(({ id }) => {
+    const channel = channels.find(ch => ch.id === id);
+    if (!channel) return Promise.resolve({ meta: {} });
+
+    const { current, next } = getNowNext(channel.name);
+
+    return Promise.resolve({
+        meta: {
+            id: channel.id,
+            type: 'tv',
+            name: channel.name,
+            poster: channel.logo,
+            description: current ? `Now: ${current.title} - Next: ${next?.title || 'N/A'}` : 'Live Channel',
+            genres: [channel.group]
+        }
+    });
+});
+
+// === EXPRESS ROUTING ===
+app.use(builder.getInterface());
+
+app.use(PROXY_PREFIX, (req, res, next) => {
+    const target = decodeURIComponent(req.path.slice(1));
+    return createProxyMiddleware({
+        target,
+        changeOrigin: true,
+        secure: false,
+        headers: {
+            referer: target,
+            origin: target
+        }
+    })(req, res, next);
+});
+
+// === START ===
+(async () => {
+    await loadM3U();
+    await loadEPG();
+
+    const port = process.env.PORT || 7000;
+    app.listen(port, () => {
+        console.log(`Addon running on port ${port}`);
+    });
+})();
