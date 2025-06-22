@@ -7,7 +7,6 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@stremio/sdk": "^1.6.12",
     "cors": "^2.8.5",
     "dayjs": "^1.11.9",
     "dotenv": "^16.3.1",
@@ -15,10 +14,11 @@
     "http-proxy-middleware": "^2.0.6",
     "iptv-playlist-parser": "^0.5.0",
     "node-fetch": "^2.6.9",
+    "stremio-addon-sdk": "^0.22.0",
     "xml2js": "^0.6.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=14.0.0"
   },
   "keywords": ["iptv", "stremio", "addon", "m3u", "epg"],
   "author": "Your Name",
