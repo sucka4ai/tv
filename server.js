@@ -11,8 +11,8 @@ const app = express();
 app.use(cors());
 
 // === CONFIGURATION ===
-const M3U_URL = 'https://example.com/playlist.m3u';
-const EPG_URL = 'https://example.com/epg.xml';
+const M3U_URL = 'http://m3u4u.com/m3u/j67zn61w6guq5z8vyd1w';
+const EPG_URL = 'https://epg.pw/xmltv/epg_GB.xml';
 const PROXY_PREFIX = '/proxy/';
 const ADDON_ID = 'org.myaddon.iptv';
 const ADDON_NAME = 'My IPTV Addon';
