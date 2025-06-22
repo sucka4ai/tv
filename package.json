@@ -1,7 +1,7 @@
 {
   "name": "iptv-addon",
   "version": "1.0.0",
-  "description": "Custom IPTV Addon for Stremio with M3U, EPG, categories, and dynamic Unsplash backgrounds",
+  "description": "Custom IPTV Addon for Stremio with M3U and EPG support",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -17,17 +17,14 @@
     "xml2js": "^0.6.2"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=24.2.0"
   },
   "keywords": [
     "iptv",
     "stremio",
     "addon",
     "m3u",
-    "epg",
-    "unsplash",
-    "tv",
-    "vod"
+    "epg"
   ],
   "author": "Your Name",
   "license": "MIT"
