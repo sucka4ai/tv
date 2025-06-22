@@ -1,32 +1,25 @@
 {
-  "name": "stremio-iptv-addon",
+  "name": "iptv-addon",
   "version": "1.0.0",
-  "description": "A custom IPTV addon for Stremio with EPG, now/next info, favorites, filters, and proxy support.",
+  "description": "Custom IPTV Addon for Stremio with M3U and EPG support",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "dayjs": "^1.11.10",
+    "dayjs": "^1.11.9",
     "express": "^4.18.2",
     "http-proxy-middleware": "^2.0.6",
-    "iptv-playlist-parser": "^0.7.0",
-    "node-fetch": "^2.6.12",
-    "stremio-addon-sdk": "^1.6.8",
-    "xml2js": "^0.4.23"
+    "iptv-playlist-parser": "^0.6.1",
+    "node-fetch": "^2.6.9",
+    "stremio-addon-sdk": "^0.21.1",
+    "xml2js": "^0.6.2"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=14.0.0"
   },
-  "keywords": [
-    "iptv",
-    "stremio",
-    "addon",
-    "epg",
-    "m3u",
-    "proxy"
-  ],
+  "keywords": ["iptv", "stremio", "addon", "m3u", "epg"],
   "author": "Your Name",
   "license": "MIT"
 }
