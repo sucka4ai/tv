@@ -142,8 +142,8 @@ app.get("/", (req, res) => {
   res.send("IPTV Addon is running.");
 });
 
-const M3U_URL = "https://example.com/playlist.m3u"; // Replace with your URL
-const EPG_URL = "https://example.com/epg.xml"; // Replace with your EPG
+const M3U_URL = "http://m3u4u.com/m3u/j67zn61w6guq5z8vyd1w"; // Replace with your URL
+const EPG_URL = "https://epg.pw/xmltv/epg_GB.xml"; // Replace with your EPG
 
 async function init() {
   await loadM3U(M3U_URL);
