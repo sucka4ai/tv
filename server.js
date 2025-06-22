@@ -22,10 +22,11 @@ const manifest = {
   resources: ["catalog", "stream", "meta"],
   types: ["tv"],
   idPrefixes: ["iptv"],
-  catalogExtra: [
+  catalogs: [
     { id: "iptv-catalog", name: "All IPTV Channels" }
   ]
 };
+
 
 const builder = new addonBuilder(manifest);
 
