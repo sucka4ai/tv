@@ -13,7 +13,7 @@
     "http-proxy-middleware": "^2.0.6",
     "iptv-playlist-parser": "^0.5.0",
     "node-fetch": "^2.6.9",
-    "stremio-addon-sdk": "^0.21.1",
+    "stremio-addon-sdk": "^1.6.12",
     "xml2js": "^0.6.2"
   },
   "engines": {
