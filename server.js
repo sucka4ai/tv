@@ -3,7 +3,7 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { parse } = require('iptv-playlist-parser');
 const { parseStringPromise } = require('xml2js');
-const { serveHTTP } = require('@stremio/sdk');
+const { serveHTTP } = require('stremio-addon-sdk');
 const dayjs = require('dayjs');
 
 const app = express();
