@@ -23,9 +23,14 @@ const manifest = {
   types: ["tv"],
   idPrefixes: ["iptv"],
   catalogs: [
-    { id: "iptv-catalog", name: "All IPTV Channels" }
+    {
+      id: "iptv-catalog",
+      name: "All IPTV Channels",
+      type: "tv"
+    }
   ]
 };
+
 
 
 const builder = new addonBuilder(manifest);
