@@ -1,188 +1,156 @@
 // server.js
+const { addonBuilder } = require("stremio-addon-sdk");
 const express = require("express");
-const cors = require("cors");
 const fetch = require("node-fetch");
+const cors = require("cors");
 const { parse } = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
-const { addonBuilder } = require("stremio-addon-sdk");
-const { createProxyMiddleware } = require("http-proxy-middleware");
 const dayjs = require("dayjs");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
 
-let channels = [];
-let categories = new Set();
-let epgData = {};
-
-const M3U_URL = "https://iptv-org.github.io/iptv/countries/gb.m3u";
-const EPG_URL = "https://iptv-org.github.io/epg/guides/gb.xml";
-
-// Proxy Setup
-app.use("/proxy", createProxyMiddleware({
-  target: "http://example.com", // dummy target, gets replaced dynamically
-  changeOrigin: true,
-  pathRewrite: (path, req) => {
-    const url = new URL(req.url.replace(/^\/proxy\//, ""));
-    req.url = url.pathname + url.search;
-    return req.url;
-  },
-  router: (req) => {
-    const url = req.url.replace(/^\/proxy\//, "");
-    return decodeURIComponent(url).split("/")[0] + "//" + decodeURIComponent(url).split("/").slice(2).join("/");
-  },
-  onProxyReq: (proxyReq, req) => {
-    proxyReq.setHeader("User-Agent", "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko)");
-    proxyReq.setHeader("Referer", req.url);
-    proxyReq.setHeader("Origin", req.get("origin") || "https://www.strem.io");
-  },
-  onProxyRes: (proxyRes, req, res) => {
-    const contentType = proxyRes.headers["content-type"] || "";
-    if (!/^video|application/.test(contentType)) {
-      console.warn(`⚠️ Unexpected content-type: ${contentType}`);
-    }
-    res.setHeader("Content-Type", contentType);
-  },
-  secure: false,
-  logLevel: "silent",
-}));
-
 const manifest = {
-  id: "org.stremio.iptvaddon",
+  id: "org.custom.iptv",
   version: "1.0.0",
   name: "Custom IPTV",
-  description: "Streams live TV using M3U and EPG.",
-  resources: ["catalog", "stream", "meta"],
+  description: "IPTV Addon with M3U and EPG support",
   types: ["tv"],
   catalogs: [{
     type: "tv",
     id: "iptv_catalog",
     name: "IPTV Channels",
-    extra: [{ name: "genre", isRequired: false }],
+    extra: [{ name: "search" }, { name: "genre" }]
   }],
+  resources: ["catalog", "stream", "meta"],
   idPrefixes: ["iptv_"],
+  logo: "https://stremio.com/website/stremio-logo-small.png",
+  background: "https://stremio.com/website/stremio-bg.jpg"
 };
 
 const builder = new addonBuilder(manifest);
 
-builder.defineCatalogHandler(({ type, extra }) => {
-  if (type !== "tv") return { metas: [] };
-  const genre = extra.genre;
-  const metas = channels
-    .filter((c) => !genre || (c.groupTitle && c.groupTitle === genre))
-    .map((c) => ({
-      id: `iptv_${c.id}`,
+let channels = [];
+let epg = {};
+
+async function loadM3U(url) {
+  const res = await fetch(url);
+  const text = await res.text();
+  const parsed = parse(text);
+  channels = parsed.items.map((item, index) => ({
+    id: `iptv_${index}`,
+    name: item.name,
+    url: item.url,
+    logo: item.tvg.logo || "",
+    group: item.group.title || "",
+    epgId: item.tvg.id || ""
+  }));
+}
+
+async function loadEPG(url) {
+  const res = await fetch(url);
+  const xml = await res.text();
+  const parser = new xml2js.Parser();
+  const result = await parser.parseStringPromise(xml);
+  epg = {};
+  if (result.tv && result.tv.programme) {
+    result.tv.programme.forEach(program => {
+      const channelId = program.$.channel;
+      if (!epg[channelId]) epg[channelId] = [];
+      epg[channelId].push({
+        start: dayjs(program.$.start, "YYYYMMDDHHmmss Z"),
+        stop: dayjs(program.$.stop, "YYYYMMDDHHmmss Z"),
+        title: program.title?.[0]?._ || ""
+      });
+    });
+  }
+}
+
+builder.defineCatalogHandler(({ type, id, extra }) => {
+  if (type !== "tv" || id !== "iptv_catalog") return { metas: [] };
+
+  let filtered = channels;
+  if (extra?.genre) filtered = filtered.filter(c => c.group === extra.genre);
+  if (extra?.search) filtered = filtered.filter(c => c.name.toLowerCase().includes(extra.search.toLowerCase()));
+
+  return {
+    metas: filtered.map(c => ({
+      id: c.id,
       type: "tv",
       name: c.name,
       poster: c.logo,
-      description: `Live channel: ${c.name}`,
-      genre: [c.groupTitle || "Other"],
-    }));
-  return Promise.resolve({ metas });
+      background: c.logo,
+      genre: [c.group]
+    }))
+  };
 });
 
-builder.defineMetaHandler(({ id }) => {
-  const channel = channels.find((c) => `iptv_${c.id}` === id);
+builder.defineMetaHandler(({ type, id }) => {
+  const channel = channels.find(c => c.id === id);
   if (!channel) return Promise.resolve({ meta: {} });
+  const now = dayjs();
+  const epgData = epg[channel.epgId] || [];
+  const current = epgData.find(e => now.isAfter(e.start) && now.isBefore(e.stop));
+
   return Promise.resolve({
     meta: {
-      id,
+      id: channel.id,
       type: "tv",
       name: channel.name,
       poster: channel.logo,
-      description: `Live channel: ${channel.name}`,
-      genre: [channel.groupTitle || "Other"],
-    },
-  });
-});
-
-builder.defineStreamHandler(({ id }) => {
-  const channel = channels.find((c) => `iptv_${c.id}` === id);
-  if (!channel) return Promise.resolve({ streams: [] });
-  const protocol = "https"; // force HTTPS for TV compatibility
-  const proxyUrl = `/proxy/${encodeURIComponent(channel.url)}`;
-  const fullUrl = `${protocol}://${"your-addon-name.onrender.com"}${proxyUrl}`;
-
-  const epg = epgData[channel.tvgId];
-  const now = epg?.[0]?.title || "Live";
-  const next = epg?.[1]?.title ? ` → ${epg[1].title}` : "";
-
-  return Promise.resolve({
-    streams: [{ title: now + next, url: fullUrl }],
-  });
-});
-
-app.get("/test-stream/:id", (req, res) => {
-  const index = parseInt(req.params.id, 10);
-  const channel = channels[index];
-  if (!channel) return res.status(404).send("Not found");
-  res.send(`<video controls autoplay src="/proxy/${encodeURIComponent(channel.url)}" style="width:100%"></video>`);
-});
-
-app.get("/categories.json", (req, res) => {
-  res.json(Array.from(categories));
-});
-
-app.get("/manifest.json", (_, res) => res.json(builder.getInterface().manifest));
-app.get("/:resource/:type/:id\.json", (req, res) => {
-  builder.getInterface().get(req, res);
-});
-
-const fetchM3U = async () => {
-  try {
-    const res = await fetch(M3U_URL);
-    const text = await res.text();
-    const parsed = parse(text);
-    channels = parsed.items
-      .filter((item) => /^https?:\/\/.*\.(m3u8|ts|mp4)/i.test(item.url))
-      .map((item, index) => {
-        if (item.group?.title) categories.add(item.group.title);
-        return {
-          id: index,
-          name: item.name,
-          url: item.url,
-          logo: item.tvg?.logo || "https://www.stremio.com/press/stremio-logo-small.png",
-          tvgId: item.tvg?.id,
-          groupTitle: item.group?.title || "Other",
-        };
-      });
-  } catch (err) {
-    console.error("Failed to load M3U:", err);
-  }
-};
-
-const fetchEPG = async () => {
-  try {
-    const res = await fetch(EPG_URL);
-    const xml = await res.text();
-    const parsed = await xml2js.parseStringPromise(xml);
-    const now = dayjs();
-
-    const channelsMap = {};
-    for (const prog of parsed.tv.programme) {
-      const start = dayjs(prog.$.start.slice(0, 14), "YYYYMMDDHHmmss");
-      const stop = dayjs(prog.$.stop.slice(0, 14), "YYYYMMDDHHmmss");
-      if (!prog.title || !prog.title[0]) continue;
-
-      const epgItem = { title: prog.title[0], start, stop };
-      const channelId = prog.$.channel;
-      if (!channelsMap[channelId]) channelsMap[channelId] = [];
-      if (now.isAfter(start) && now.isBefore(stop)) {
-        channelsMap[channelId].unshift(epgItem);
-      } else if (now.isBefore(start)) {
-        channelsMap[channelId].push(epgItem);
-      }
+      background: channel.logo,
+      genre: [channel.group],
+      description: current ? `Now: ${current.title}` : "No current program info"
     }
-    epgData = channelsMap;
-  } catch (err) {
-    console.error("Failed to load EPG:", err);
-  }
-};
+  });
+});
 
-(async () => {
-  await fetchM3U();
-  await fetchEPG();
-  app.listen(PORT, () => console.log(`✅ Addon running on http://localhost:${PORT}`));
-})();
+builder.defineStreamHandler(({ type, id }) => {
+  const channel = channels.find(c => c.id === id);
+  if (!channel) return Promise.resolve({ streams: [] });
+  return Promise.resolve({
+    streams: [
+      {
+        title: "Live Stream",
+        url: `/proxy/${encodeURIComponent(channel.url)}`,
+        behaviorHints: {
+          notWebReady: false // ensures Smart TV compatibility
+        }
+      }
+    ]
+  });
+});
+
+// Local proxy endpoint to bypass CORS and Smart TV restrictions
+app.use("/proxy/:url", (req, res, next) => {
+  const targetUrl = decodeURIComponent(req.params.url);
+  createProxyMiddleware({
+    target: targetUrl,
+    changeOrigin: true,
+    secure: false,
+    selfHandleResponse: false,
+    pathRewrite: () => ""
+  })(req, res, next);
+});
+
+app.get("/manifest.json", (req, res) => {
+  res.send(builder.getInterface().getManifest());
+});
+
+app.get("/", (req, res) => {
+  res.send("IPTV Addon is running.");
+});
+
+const M3U_URL = "https://example.com/playlist.m3u"; // Replace with your URL
+const EPG_URL = "https://example.com/epg.xml"; // Replace with your EPG
+
+async function init() {
+  await loadM3U(M3U_URL);
+  await loadEPG(EPG_URL);
+  app.use("/stremio/v1", builder.getInterface().getRouter());
+  const port = process.env.PORT || 7000;
+  app.listen(port, () => console.log(`Addon listening on port ${port}`));
+}
+
+init();
