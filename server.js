@@ -16,14 +16,14 @@ async function fetchM3U() {
     const text = await res.text();
     const parsed = parser.parse(text);
     channels = parsed.items.map((item, index) => {
-        const category = item.group.title || 'Uncategorized';
+        const category = item.group?.title?.trim() || 'Uncategorized';
         categories.add(category);
         return {
             id: `channel-${index}`,
             name: item.name,
             url: item.url,
             logo: item.tvg.logo,
-            category: category,
+            category,
             tvgId: item.tvg.id
         };
     });
@@ -57,6 +57,7 @@ function getNowNext(channelId) {
     for (let i = 0; i < programs.length; i++) {
         const start = dayjs(programs[i].start, 'YYYYMMDDHHmmss ZZ');
         const end = dayjs(programs[i].stop, 'YYYYMMDDHHmmss ZZ');
+
         if (now.isAfter(start) && now.isBefore(end)) {
             nowProgram = programs[i];
             nextProgram = programs[i + 1] || null;
@@ -80,44 +81,36 @@ async function buildAddon() {
         id: 'community.shannyiptv',
         version: '1.0.0',
         name: 'Shanny IPTV',
-        description: 'Watch IPTV channels by category with EPG info',
+        description: 'Watch live IPTV channels with categories and EPG support.',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg',
-        resources: ['catalog', 'stream', 'meta'],
+        resources: ['catalog', 'meta', 'stream'],
         types: ['tv'],
         idPrefixes: ['channel-'],
-        catalogs: [{
-            type: 'tv',
-            id: 'shannyiptv',
-            name: 'Shanny IPTV',
-            extra: [
-                {
-                    name: 'genre',
-                    isRequired: false
-                }
-            ]
-        }]
+        catalogs: [
+            ...[...categories].map(cat => ({
+                type: 'tv',
+                id: `shanny_${cat.toLowerCase().replace(/\s+/g, '_')}`,
+                name: 'Shanny IPTV'
+            }))
+        ]
     };
 
     const builder = new addonBuilder(manifest);
 
-    builder.defineCatalogHandler(({ id, extra }) => {
-        if (id !== 'shannyiptv') return Promise.resolve({ metas: [] });
+    builder.defineCatalogHandler(({ id }) => {
+        const category = id.replace(/^shanny_/, '').replace(/_/g, ' ').toLowerCase();
+        const filtered = channels.filter(ch => ch.category.toLowerCase() === category);
 
-        const genre = extra?.genre;
-        const filtered = genre
-            ? channels.filter(ch => ch.category.toLowerCase() === genre.toLowerCase())
-            : channels;
-
-        const metas = filtered.map(channel => ({
-            id: channel.id,
-            type: 'tv',
-            name: channel.name,
-            poster: channel.logo,
-            background: getUnsplashImage(channel.category),
-            description: `Live stream for ${channel.name}`
-        }));
-
-        return Promise.resolve({ metas });
+        return Promise.resolve({
+            metas: filtered.map(channel => ({
+                id: channel.id,
+                type: 'tv',
+                name: channel.name,
+                poster: channel.logo,
+                background: getUnsplashImage(channel.category),
+                description: `Live stream for ${channel.name}`
+            }))
+        });
     });
 
     builder.defineMetaHandler(({ id }) => {
@@ -130,8 +123,8 @@ async function buildAddon() {
                 id: channel.id,
                 type: 'tv',
                 name: channel.name,
-                logo: channel.logo,
                 poster: channel.logo,
+                logo: channel.logo,
                 background: getUnsplashImage(channel.category),
                 description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`
             }
@@ -156,5 +149,5 @@ buildAddon().then(addonInterface => {
     serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
     console.log('✅ Shanny IPTV Addon running...');
 }).catch(err => {
-    console.error('❌ Error starting IPTV addon:', err);
+    console.error('❌ Error starting addon:', err);
 });
