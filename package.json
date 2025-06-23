@@ -1,9 +1,8 @@
 {
-  "name": "shanny-iptv-addon",
+  "name": "iptv-addon",
   "version": "1.0.0",
-  "description": "Custom IPTV Addon for Stremio with M3U, EPG, category filters, and Unsplash backgrounds",
+  "description": "Shanny IPTV Addon for Stremio with M3U, EPG, categories, and dynamic Unsplash backgrounds",
   "main": "server.js",
-  "type": "commonjs",
   "scripts": {
     "start": "node server.js"
   },
@@ -24,8 +23,8 @@
     "m3u",
     "epg",
     "tv",
-    "unsplash",
-    "streaming"
+    "vod",
+    "unsplash"
   ],
   "author": "Your Name",
   "license": "MIT"
