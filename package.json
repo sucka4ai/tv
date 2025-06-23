@@ -1,21 +1,21 @@
 {
-  "name": "iptv-addon",
-  "version": "1.0.0",
-  "description": "Custom IPTV Addon for Stremio using M3U and EPG",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=16.0.0"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dayjs": "^1.11.10",
-    "express": "^4.18.2",
-    "iptv-playlist-parser": "^0.7.0",
-    "node-fetch": "^2.6.9",
-    "stremio-addon-sdk": "^1.1.11",
-    "xml2js": "^0.4.23"
-  }
+  "name": "iptv-addon",
+  "version": "1.0.0",
+  "description": "Custom IPTV Addon for Stremio using M3U and EPG",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
+    "express": "^4.18.2",
+    "iptv-playlist-parser": "^0.7.0",
+    "node-fetch": "^2.6.9",
+    "stremio-addon-sdk": "^1.1.11",
+    "xml2js": "^0.4.23"
+  }
 }
