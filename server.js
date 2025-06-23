@@ -67,51 +67,56 @@ function getNowNext(channelId) {
     return { now: nowProgram, next: nextProgram };
 }
 
-// Build addon
+function getUnsplashImage(category) {
+    const encoded = encodeURIComponent(category || 'tv');
+    return `https://source.unsplash.com/1600x900/?${encoded}`;
+}
+
 async function buildAddon() {
     await fetchM3U();
     await fetchEPG();
 
     const manifest = {
-        id: 'community.myiptv',
+        id: 'community.shannyiptv',
         version: '1.0.0',
-        name: 'My IPTV',
-        description: 'Watch IPTV channels by category with EPG',
+        name: 'Shanny IPTV',
+        description: 'Watch IPTV channels by category with EPG info',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg',
         resources: ['catalog', 'stream', 'meta'],
         types: ['tv'],
-        catalogs: [{ type: 'tv', id: 'iptv-root', name: 'My IPTV' }],
-        idPrefixes: ['channel-', 'cat-']
+        idPrefixes: ['channel-'],
+        catalogs: [{
+            type: 'tv',
+            id: 'shannyiptv',
+            name: 'Shanny IPTV',
+            extra: [
+                {
+                    name: 'genre',
+                    isRequired: false
+                }
+            ]
+        }]
     };
 
     const builder = new addonBuilder(manifest);
 
-    // First level: categories shown under root catalog
-    builder.defineCatalogHandler(({ id }) => {
-        if (id === 'iptv-root') {
-            const catMetas = [...categories].map(cat => ({
-                id: `cat-${cat.toLowerCase().replace(/\s+/g, '-')}`,
-                type: 'tv',
-                name: cat,
-                poster: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Television_static.png',
-                description: `Browse ${cat} channels`
-            }));
-            return Promise.resolve({ metas: catMetas });
-        }
+    builder.defineCatalogHandler(({ id, extra }) => {
+        if (id !== 'shannyiptv') return Promise.resolve({ metas: [] });
 
-        // Category catalog
-        const catName = id.replace(/^cat-/, '').replace(/-/g, ' ').toLowerCase();
-        const filtered = channels.filter(ch => ch.category.toLowerCase() === catName);
-        const metas = filtered.map(channel => {
-            const epg = getNowNext(channel.tvgId);
-            return {
-                id: channel.id,
-                type: 'tv',
-                name: channel.name,
-                poster: channel.logo,
-                description: `${epg.now?.title || 'Live Channel'} — ${epg.next?.title || 'Up next'}`
-            };
-        });
+        const genre = extra?.genre;
+        const filtered = genre
+            ? channels.filter(ch => ch.category.toLowerCase() === genre.toLowerCase())
+            : channels;
+
+        const metas = filtered.map(channel => ({
+            id: channel.id,
+            type: 'tv',
+            name: channel.name,
+            poster: channel.logo,
+            background: getUnsplashImage(channel.category),
+            description: `Live stream for ${channel.name}`
+        }));
+
         return Promise.resolve({ metas });
     });
 
@@ -125,8 +130,10 @@ async function buildAddon() {
                 id: channel.id,
                 type: 'tv',
                 name: channel.name,
+                logo: channel.logo,
                 poster: channel.logo,
-                description: `${epg.now?.title || 'Live'}\n${epg.now?.desc || ''}`
+                background: getUnsplashImage(channel.category),
+                description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`
             }
         });
     });
@@ -135,17 +142,19 @@ async function buildAddon() {
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return Promise.resolve({ streams: [] });
         return Promise.resolve({
-            streams: [{ title: channel.name, url: channel.url }]
+            streams: [{
+                url: channel.url,
+                title: channel.name
+            }]
         });
     });
 
     return builder.getInterface();
 }
 
-// Start
 buildAddon().then(addonInterface => {
     serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
-    console.log('✅ IPTV Addon running on port', process.env.PORT || 7000);
+    console.log('✅ Shanny IPTV Addon running...');
 }).catch(err => {
     console.error('❌ Error starting IPTV addon:', err);
 });
