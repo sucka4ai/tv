@@ -10,7 +10,6 @@ const EPG_URL = process.env.EPG_URL;
 let channels = [];
 let epgData = {};
 let categories = new Set();
-let isReady = false;
 
 async function fetchM3U() {
     const res = await fetch(M3U_URL);
@@ -58,7 +57,6 @@ function getNowNext(channelId) {
     for (let i = 0; i < programs.length; i++) {
         const start = dayjs(programs[i].start, 'YYYYMMDDHHmmss ZZ');
         const end = dayjs(programs[i].stop, 'YYYYMMDDHHmmss ZZ');
-
         if (now.isAfter(start) && now.isBefore(end)) {
             nowProgram = programs[i];
             nextProgram = programs[i + 1] || null;
@@ -69,85 +67,55 @@ function getNowNext(channelId) {
     return { now: nowProgram, next: nextProgram };
 }
 
-function getUnsplashImage(category) {
-    const encoded = encodeURIComponent(category || 'tv');
-    return `https://source.unsplash.com/1600x900/?${encoded}`;
-}
-
-async function loadData() {
-    try {
-        console.log('🔄 Fetching M3U and EPG data...');
-        categories = new Set(); // reset in case of reload
-        await fetchM3U();
-        await fetchEPG();
-        isReady = true;
-        console.log(`✅ Loaded ${channels.length} channels in ${categories.size} categories`);
-    } catch (err) {
-        console.error('❌ Error fetching data:', err.message);
-    }
-}
-
-// Initial load
-loadData();
-
-// Refresh every 30 minutes
-setInterval(loadData, 30 * 60 * 1000);
-
-// Addon builder
+// Build addon
 async function buildAddon() {
+    await fetchM3U();
+    await fetchEPG();
+
     const manifest = {
-        id: 'community.iptvaddon',
+        id: 'community.myiptv',
         version: '1.0.0',
-        name: 'IPTV Channels',
-        description: 'Watch IPTV channels with EPG and category support',
+        name: 'My IPTV',
+        description: 'Watch IPTV channels by category with EPG',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg',
         resources: ['catalog', 'stream', 'meta'],
         types: ['tv'],
-        catalogs: [
-            { type: 'tv', id: 'all', name: 'All Channels' },
-            ...[...categories].map(cat => ({
-                type: 'tv',
-                id: cat.toLowerCase().replace(/\s+/g, '-'),
-                name: cat
-            }))
-        ],
-        idPrefixes: ['channel-']
+        catalogs: [{ type: 'tv', id: 'iptv-root', name: 'My IPTV' }],
+        idPrefixes: ['channel-', 'cat-']
     };
 
     const builder = new addonBuilder(manifest);
 
+    // First level: categories shown under root catalog
     builder.defineCatalogHandler(({ id }) => {
-        if (!isReady) {
-            return Promise.resolve({
-                metas: [{
-                    id: 'loading',
-                    type: 'tv',
-                    name: 'Loading channels...',
-                    poster: 'https://i.imgur.com/llF5iyg.gif',
-                    description: 'Fetching IPTV playlist and EPG. Please wait...'
-                }]
-            });
+        if (id === 'iptv-root') {
+            const catMetas = [...categories].map(cat => ({
+                id: `cat-${cat.toLowerCase().replace(/\s+/g, '-')}`,
+                type: 'tv',
+                name: cat,
+                poster: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Television_static.png',
+                description: `Browse ${cat} channels`
+            }));
+            return Promise.resolve({ metas: catMetas });
         }
 
-        const filtered = id === 'all'
-            ? channels
-            : channels.filter(ch => ch.category.toLowerCase().replace(/\s+/g, '-') === id);
-
-        return Promise.resolve({
-            metas: filtered.map(channel => ({
+        // Category catalog
+        const catName = id.replace(/^cat-/, '').replace(/-/g, ' ').toLowerCase();
+        const filtered = channels.filter(ch => ch.category.toLowerCase() === catName);
+        const metas = filtered.map(channel => {
+            const epg = getNowNext(channel.tvgId);
+            return {
                 id: channel.id,
                 type: 'tv',
                 name: channel.name,
                 poster: channel.logo,
-                background: getUnsplashImage(channel.category),
-                description: `Live stream for ${channel.name}`
-            }))
+                description: `${epg.now?.title || 'Live Channel'} — ${epg.next?.title || 'Up next'}`
+            };
         });
+        return Promise.resolve({ metas });
     });
 
     builder.defineMetaHandler(({ id }) => {
-        if (!isReady) return Promise.resolve({ meta: {} });
-
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return Promise.resolve({ meta: {} });
 
@@ -157,35 +125,27 @@ async function buildAddon() {
                 id: channel.id,
                 type: 'tv',
                 name: channel.name,
-                logo: channel.logo,
                 poster: channel.logo,
-                background: getUnsplashImage(channel.category),
-                description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`
+                description: `${epg.now?.title || 'Live'}\n${epg.now?.desc || ''}`
             }
         });
     });
 
     builder.defineStreamHandler(({ id }) => {
-        if (!isReady) return Promise.resolve({ streams: [] });
-
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return Promise.resolve({ streams: [] });
-
         return Promise.resolve({
-            streams: [{
-                url: channel.url,
-                title: channel.name
-            }]
+            streams: [{ title: channel.name, url: channel.url }]
         });
     });
 
     return builder.getInterface();
 }
 
-// Serve the addon
+// Start
 buildAddon().then(addonInterface => {
     serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
-    console.log('✅ IPTV Addon running...');
+    console.log('✅ IPTV Addon running on port', process.env.PORT || 7000);
 }).catch(err => {
     console.error('❌ Error starting IPTV addon:', err);
 });
