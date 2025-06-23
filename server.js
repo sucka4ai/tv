@@ -10,6 +10,7 @@ const EPG_URL = process.env.EPG_URL;
 let channels = [];
 let epgData = {};
 let categories = new Set();
+let isReady = false;
 
 async function fetchM3U() {
     const res = await fetch(M3U_URL);
@@ -73,11 +74,27 @@ function getUnsplashImage(category) {
     return `https://source.unsplash.com/1600x900/?${encoded}`;
 }
 
-// Build the addon interface
-async function buildAddon() {
-    await fetchM3U();
-    await fetchEPG();
+async function loadData() {
+    try {
+        console.log('🔄 Fetching M3U and EPG data...');
+        categories = new Set(); // reset in case of reload
+        await fetchM3U();
+        await fetchEPG();
+        isReady = true;
+        console.log(`✅ Loaded ${channels.length} channels in ${categories.size} categories`);
+    } catch (err) {
+        console.error('❌ Error fetching data:', err.message);
+    }
+}
 
+// Initial load
+loadData();
+
+// Refresh every 30 minutes
+setInterval(loadData, 30 * 60 * 1000);
+
+// Addon builder
+async function buildAddon() {
     const manifest = {
         id: 'community.iptvaddon',
         version: '1.0.0',
@@ -100,20 +117,37 @@ async function buildAddon() {
     const builder = new addonBuilder(manifest);
 
     builder.defineCatalogHandler(({ id }) => {
+        if (!isReady) {
+            return Promise.resolve({
+                metas: [{
+                    id: 'loading',
+                    type: 'tv',
+                    name: 'Loading channels...',
+                    poster: 'https://i.imgur.com/llF5iyg.gif',
+                    description: 'Fetching IPTV playlist and EPG. Please wait...'
+                }]
+            });
+        }
+
         const filtered = id === 'all'
             ? channels
             : channels.filter(ch => ch.category.toLowerCase().replace(/\s+/g, '-') === id);
-        return Promise.resolve({ metas: filtered.map(channel => ({
-            id: channel.id,
-            type: 'tv',
-            name: channel.name,
-            poster: channel.logo,
-            background: getUnsplashImage(channel.category),
-            description: `Live stream for ${channel.name}`
-        })) });
+
+        return Promise.resolve({
+            metas: filtered.map(channel => ({
+                id: channel.id,
+                type: 'tv',
+                name: channel.name,
+                poster: channel.logo,
+                background: getUnsplashImage(channel.category),
+                description: `Live stream for ${channel.name}`
+            }))
+        });
     });
 
     builder.defineMetaHandler(({ id }) => {
+        if (!isReady) return Promise.resolve({ meta: {} });
+
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return Promise.resolve({ meta: {} });
 
@@ -132,8 +166,11 @@ async function buildAddon() {
     });
 
     builder.defineStreamHandler(({ id }) => {
+        if (!isReady) return Promise.resolve({ streams: [] });
+
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return Promise.resolve({ streams: [] });
+
         return Promise.resolve({
             streams: [{
                 url: channel.url,
@@ -145,7 +182,7 @@ async function buildAddon() {
     return builder.getInterface();
 }
 
-// Start server
+// Serve the addon
 buildAddon().then(addonInterface => {
     serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
     console.log('✅ IPTV Addon running...');
