@@ -16,14 +16,14 @@ async function fetchM3U() {
     const text = await res.text();
     const parsed = parser.parse(text);
     channels = parsed.items.map((item, index) => {
-        const category = item.group?.title?.trim() || 'Uncategorized';
+        const category = item.group.title || 'Uncategorized';
         categories.add(category);
         return {
             id: `channel-${index}`,
             name: item.name,
             url: item.url,
             logo: item.tvg.logo,
-            category,
+            category: category,
             tvgId: item.tvg.id
         };
     });
@@ -73,6 +73,7 @@ function getUnsplashImage(category) {
     return `https://source.unsplash.com/1600x900/?${encoded}`;
 }
 
+// Build the addon interface
 async function buildAddon() {
     await fetchM3U();
     await fetchEPG();
@@ -81,36 +82,37 @@ async function buildAddon() {
         id: 'community.shannyiptv',
         version: '1.0.0',
         name: 'Shanny IPTV',
-        description: 'Watch live IPTV channels with categories and EPG support.',
+        description: 'Watch IPTV channels with EPG and categories',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg',
-        resources: ['catalog', 'meta', 'stream'],
+        resources: ['catalog', 'stream', 'meta'],
         types: ['tv'],
-        idPrefixes: ['channel-'],
         catalogs: [
+            { type: 'tv', id: 'shanny_all', name: 'All Channels' },
             ...[...categories].map(cat => ({
                 type: 'tv',
                 id: `shanny_${cat.toLowerCase().replace(/\s+/g, '_')}`,
-                name: 'Shanny IPTV'
+                name: cat
             }))
-        ]
+        ],
+        idPrefixes: ['channel-']
     };
 
     const builder = new addonBuilder(manifest);
 
     builder.defineCatalogHandler(({ id }) => {
-        const category = id.replace(/^shanny_/, '').replace(/_/g, ' ').toLowerCase();
-        const filtered = channels.filter(ch => ch.category.toLowerCase() === category);
+        const catName = id.replace(/^shanny_/, '').replace(/_/g, ' ');
+        const filtered = catName === 'all'
+            ? channels
+            : channels.filter(ch => ch.category.toLowerCase() === catName.toLowerCase());
 
-        return Promise.resolve({
-            metas: filtered.map(channel => ({
-                id: channel.id,
-                type: 'tv',
-                name: channel.name,
-                poster: channel.logo,
-                background: getUnsplashImage(channel.category),
-                description: `Live stream for ${channel.name}`
-            }))
-        });
+        return Promise.resolve({ metas: filtered.map(channel => ({
+            id: channel.id,
+            type: 'tv',
+            name: channel.name,
+            poster: channel.logo,
+            background: getUnsplashImage(channel.category),
+            description: `Live stream for ${channel.name}`
+        })) });
     });
 
     builder.defineMetaHandler(({ id }) => {
@@ -123,8 +125,8 @@ async function buildAddon() {
                 id: channel.id,
                 type: 'tv',
                 name: channel.name,
-                poster: channel.logo,
                 logo: channel.logo,
+                poster: channel.logo,
                 background: getUnsplashImage(channel.category),
                 description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`
             }
@@ -134,6 +136,7 @@ async function buildAddon() {
     builder.defineStreamHandler(({ id }) => {
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return Promise.resolve({ streams: [] });
+
         return Promise.resolve({
             streams: [{
                 url: channel.url,
@@ -145,9 +148,10 @@ async function buildAddon() {
     return builder.getInterface();
 }
 
+// Start server
 buildAddon().then(addonInterface => {
     serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
-    console.log('✅ Shanny IPTV Addon running...');
+    console.log('✅ Shanny IPTV Addon is running...');
 }).catch(err => {
     console.error('❌ Error starting addon:', err);
 });
