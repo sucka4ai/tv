@@ -1,8 +1,8 @@
-const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
-const fetch = require('node-fetch');
-const parser = require('iptv-playlist-parser');
-const xml2js = require('xml2js');
-const dayjs = require('dayjs');
+import { addonBuilder, serveHTTP } from 'stremio-addon-sdk';
+import fetch from 'node-fetch';
+import parser from 'iptv-playlist-parser';
+import xml2js from 'xml2js';
+import dayjs from 'dayjs';
 
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
@@ -18,7 +18,7 @@ async function fetchM3U() {
     const parsed = parser.parse(text);
 
     channels = parsed.items
-        .filter(item => item.url && item.url.includes('.m3u8')) // Only .m3u8 for better buffering
+        .filter(item => item.url && item.url.includes('.m3u8')) // Only use .m3u8 URLs
         .map((item, index) => {
             const category = item.group.title || 'Uncategorized';
             categories.add(category);
@@ -34,7 +34,7 @@ async function fetchM3U() {
 }
 
 async function fetchEPG() {
-    if (epgLoaded) return; // Lazy load
+    if (epgLoaded) return;
     const res = await fetch(EPG_URL);
     const xml = await res.text();
     const result = await xml2js.parseStringPromise(xml);
@@ -80,7 +80,7 @@ function getUnsplashImage(category) {
 }
 
 async function buildAddon() {
-    await fetchM3U(); // preload channels, lazy EPG
+    await fetchM3U();
 
     const manifest = {
         id: 'community.shannyiptv',
@@ -94,10 +94,7 @@ async function buildAddon() {
             type: 'tv',
             id: 'shannyiptv',
             name: 'Shanny IPTV',
-            extra: [{
-                name: 'genre',
-                isRequired: false
-            }]
+            extra: [{ name: 'genre', isRequired: false }]
         }],
         idPrefixes: ['channel-']
     };
@@ -123,12 +120,13 @@ async function buildAddon() {
     });
 
     builder.defineMetaHandler(async ({ id }) => {
-        await fetchEPG(); // lazy-load EPG
+        await fetchEPG(); // lazy load EPG
 
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return { meta: {} };
 
         const epg = getNowNext(channel.tvgId);
+
         return {
             meta: {
                 id: channel.id,
@@ -145,11 +143,12 @@ async function buildAddon() {
     builder.defineStreamHandler(({ id }) => {
         const channel = channels.find(ch => ch.id === id);
         if (!channel) return { streams: [] };
+
         return {
             streams: [{
                 url: channel.url,
                 title: channel.name,
-                externalUrl: true // no proxying
+                externalUrl: true // disables proxying
             }]
         };
     });
@@ -157,10 +156,9 @@ async function buildAddon() {
     return builder.getInterface();
 }
 
-// Start server
 buildAddon().then(addonInterface => {
     serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
     console.log('✅ Shanny IPTV Addon running...');
 }).catch(err => {
-    console.error('❌ Error starting IPTV addon:', err);
+    console.error('❌ Failed to start addon:', err);
 });
