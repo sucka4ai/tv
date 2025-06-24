@@ -1,68 +1,64 @@
-const { serveHTTP, addonBuilder } = require('stremio-addon-sdk');
-const fetch = require('node-fetch');
-const parser = require('iptv-playlist-parser');
-const xml2js = require('xml2js');
-const dayjs = require('dayjs');
+import { addonBuilder, serveHTTP } from 'stremio-addon-sdk';
+import fetch from 'node-fetch';
+import parser from 'iptv-playlist-parser';
+import xml2js from 'xml2js';
+import dayjs from 'dayjs';
 
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
+const PORT = process.env.PORT || 7000;
 
 let channels = [];
-let categories = new Set();
 let epgData = {};
-const epgCache = {};
+let categories = new Set();
 
 async function fetchM3U() {
     const res = await fetch(M3U_URL);
     const text = await res.text();
     const parsed = parser.parse(text);
-
-    channels = parsed.items.map((item, index) => {
-        const category = item.group.title || 'Uncategorized';
-        categories.add(category);
-        return {
-            id: `channel-${index}`,
-            name: item.name,
-            url: item.url.includes('.m3u8') ? item.url : item.url, // conservatively keep as-is
-            logo: item.tvg.logo,
-            category: category,
-            tvgId: item.tvg.id || `tvg-${index}`
-        };
-    });
+    channels = parsed.items
+        .filter(item => item.url.endsWith('.m3u8')) // only keep HLS streams
+        .map((item, index) => {
+            const category = item.group?.title || 'Uncategorized';
+            categories.add(category);
+            return {
+                id: `channel-${index}`,
+                name: item.name,
+                url: item.url,
+                logo: item.tvg?.logo,
+                category: category,
+                tvgId: item.tvg?.id
+            };
+        });
 }
 
-function getUnsplashImage(category) {
-    const encoded = encodeURIComponent(category || 'tv');
-    return `https://source.unsplash.com/1600x900/?${encoded}`;
-}
-
-async function getNowNext(channelId) {
-    const now = dayjs();
-
-    // Lazy load full EPG data once
-    if (!Object.keys(epgData).length) {
+async function fetchEPG() {
+    try {
         const res = await fetch(EPG_URL);
         const xml = await res.text();
         const result = await xml2js.parseStringPromise(xml);
         const programs = result.tv?.programme || [];
 
+        epgData = {};
         for (const program of programs) {
-            const cid = program.$.channel;
-            if (!epgData[cid]) epgData[cid] = [];
-            epgData[cid].push({
+            const channelId = program.$.channel;
+            if (!epgData[channelId]) epgData[channelId] = [];
+            epgData[channelId].push({
                 start: program.$.start,
                 stop: program.$.stop,
                 title: program.title?.[0]?._ || 'No Title',
                 desc: program.desc?.[0]?._ || ''
             });
         }
+        console.log('✅ EPG loaded');
+    } catch (err) {
+        console.error('❌ Error loading EPG:', err.message);
     }
+}
 
-    if (!epgCache[channelId]) {
-        epgCache[channelId] = epgData[channelId] || [];
-    }
-
-    const programs = epgCache[channelId];
+function getNowNext(channelId) {
+    const now = dayjs();
+    const programs = epgData[channelId] || [];
     let nowProgram = null;
     let nextProgram = null;
 
@@ -79,35 +75,48 @@ async function getNowNext(channelId) {
     return { now: nowProgram, next: nextProgram };
 }
 
+function getUnsplashImage(category) {
+    const encoded = encodeURIComponent(category || 'tv');
+    return `https://source.unsplash.com/1600x900/?${encoded}`;
+}
+
 async function buildAddon() {
     await fetchM3U();
 
     const manifest = {
-        id: 'community.shannyiptv',
+        id: 'shanny.iptv',
         version: '1.0.0',
         name: 'Shanny IPTV',
-        description: 'Live IPTV channels with categories and EPG',
+        description: 'Watch IPTV channels with categories and EPG',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg',
-        resources: ['catalog', 'meta', 'stream'],
         types: ['tv'],
-        catalogs: [
-            {
-                type: 'tv',
-                id: 'shannyiptv',
-                name: 'Shanny IPTV',
-                extra: [{ name: 'genre', options: [...categories], isRequired: false }]
-            }
-        ],
-        idPrefixes: ['channel-']
+        resources: ['catalog', 'stream', 'meta'],
+        idPrefixes: ['channel-'],
+        catalogs: [{
+            type: 'tv',
+            id: 'shanny-iptv',
+            name: 'Shanny IPTV',
+            extra: [
+                {
+                    name: 'genre',
+                    isRequired: false,
+                    options: Array.from(categories).map(cat => cat.toLowerCase().replace(/\s+/g, '-')),
+                    optionsLimit: 100
+                }
+            ]
+        }]
     };
 
     const builder = new addonBuilder(manifest);
 
-    builder.defineCatalogHandler(({ type, id, extra }) => {
-        let filtered = channels;
-        if (extra && extra.genre) {
-            filtered = channels.filter(ch => ch.category === extra.genre);
-        }
+    builder.defineCatalogHandler(({ id, extra }) => {
+        if (id !== 'shanny-iptv') return Promise.resolve({ metas: [] });
+
+        const genre = (extra?.genre || '').toLowerCase();
+        const filtered = genre
+            ? channels.filter(ch => ch.category.toLowerCase().replace(/\s+/g, '-') === genre)
+            : channels;
+
         return Promise.resolve({
             metas: filtered.map(channel => ({
                 id: channel.id,
@@ -120,22 +129,22 @@ async function buildAddon() {
         });
     });
 
-    builder.defineMetaHandler(async ({ id }) => {
+    builder.defineMetaHandler(({ id }) => {
         const channel = channels.find(ch => ch.id === id);
-        if (!channel) return { meta: {} };
+        if (!channel) return Promise.resolve({ meta: {} });
 
-        const epg = await getNowNext(channel.tvgId);
-        return {
+        const epg = getNowNext(channel.tvgId);
+        return Promise.resolve({
             meta: {
                 id: channel.id,
                 type: 'tv',
                 name: channel.name,
-                logo: channel.logo,
                 poster: channel.logo,
                 background: getUnsplashImage(channel.category),
-                description: `${epg.now?.title || 'No program info'} — ${epg.next?.title || 'No next info'}`
+                logo: channel.logo,
+                description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`
             }
-        };
+        });
     });
 
     builder.defineStreamHandler(({ id }) => {
@@ -145,8 +154,8 @@ async function buildAddon() {
         return Promise.resolve({
             streams: [{
                 url: channel.url,
-                title: channel.name,
-                externalUrl: true // ✅ stream played directly in Stremio
+                externalUrl: true,
+                title: channel.name
             }]
         });
     });
@@ -155,9 +164,10 @@ async function buildAddon() {
 }
 
 // Start server
-buildAddon().then(addonInterface => {
-    serveHTTP(addonInterface, { port: process.env.PORT || 7000 });
-    console.log('✅ Shanny IPTV Addon running...');
+buildAddon().then(addon => {
+    serveHTTP(addon, { port: PORT });
+    console.log(`✅ Shanny IPTV Addon running on port ${PORT}`);
+    setTimeout(fetchEPG, 5000); // lazy-load EPG after boot
 }).catch(err => {
-    console.error('❌ Error starting IPTV addon:', err);
+    console.error('❌ Error starting addon:', err.message);
 });
