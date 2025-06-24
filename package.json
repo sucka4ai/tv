@@ -1,31 +1,23 @@
 {
   "name": "iptv-addon",
   "version": "1.0.0",
-  "description": "Shanny IPTV Addon for Stremio with M3U, EPG, categories, and dynamic Unsplash backgrounds",
+  "description": "Stremio IPTV Addon for Shanny IPTV with categories and EPG",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "keywords": ["iptv", "stremio", "addon", "epg", "m3u", "tv"],
+  "author": "Shanny IPTV",
+  "license": "MIT",
   "dependencies": {
-    "dayjs": "^1.11.9",
-    "iptv-playlist-parser": "^0.5.0",
-    "node-fetch": "^2.6.9",
+    "dayjs": "^1.11.10",
+    "iptv-playlist-parser": "^0.10.1",
+    "node-fetch": "^3.4.1",
     "stremio-addon-sdk": "^1.6.10",
     "xml2js": "^0.6.2"
   },
   "engines": {
     "node": ">=24.0.0"
   },
-  "keywords": [
-    "iptv",
-    "stremio",
-    "addon",
-    "m3u",
-    "epg",
-    "tv",
-    "vod",
-    "unsplash"
-  ],
-  "author": "Your Name",
-  "license": "MIT"
+  "type": "module"
 }
