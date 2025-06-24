@@ -10,7 +10,7 @@
   "dependencies": {
     "dayjs": "^1.11.10",
     "iptv-playlist-parser": "^0.7.0",
-    "node-fetch": "^3.4.1",
+    "node-fetch": "^3.3.2",
     "stremio-addon-sdk": "^0.20.6",
     "xml2js": "^0.6.2"
   },
