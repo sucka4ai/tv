@@ -1,23 +1,20 @@
 {
   "name": "iptv-addon",
   "version": "1.0.0",
-  "description": "Stremio IPTV Addon for Shanny IPTV with categories and EPG",
+  "description": "Shanny IPTV Addon for Stremio with categories and EPG",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": ["iptv", "stremio", "addon", "epg", "m3u", "tv"],
-  "author": "Shanny IPTV",
-  "license": "MIT",
   "dependencies": {
     "dayjs": "^1.11.10",
-    "iptv-playlist-parser": "^0.10.1",
-    "node-fetch": "^3.3.2",
-    "stremio-addon-sdk": "^1.6.10",
+    "iptv-playlist-parser": "^0.7.0",
+    "node-fetch": "^3.4.1",
+    "stremio-addon-sdk": "^0.20.6",
     "xml2js": "^0.6.2"
   },
   "engines": {
     "node": ">=24.0.0"
-  },
-  "type": "module"
+  }
 }
