@@ -1,4 +1,6 @@
-import { addonBuilder, serveHTTP } from 'stremio-addon-sdk';
+import pkg from 'stremio-addon-sdk';
+const { addonBuilder, serveHTTP } = pkg;
+
 import fetch from 'node-fetch';
 import parser from 'iptv-playlist-parser';
 import xml2js from 'xml2js';
