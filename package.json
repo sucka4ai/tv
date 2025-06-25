@@ -1,7 +1,7 @@
 {
   "name": "iptv-addon",
   "version": "1.0.0",
-  "description": "Stremio IPTV addon with categories and optimized streaming",
+  "description": "Stremio IPTV addon with M3U, EPG, categories, and performance tweaks",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
