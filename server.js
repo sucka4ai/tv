@@ -6,7 +6,7 @@ const dayjs = require('dayjs');
 const http = require('http');
 
 const M3U_URL = 'http://m3u4u.com/m3u/j67zn61w6guq5z8vyd1w'; 
-const EPG_URL = 'https://epg.pw/xmltv/epg_GB.xml';   
+const EPG_URL = 'https://epg.pw/xmltv/epg_GB.xml'; 
 
 let channels = [];
 let categories = {};
@@ -17,40 +17,38 @@ async function loadPlaylist() {
     const m3u = await res.text();
     const parsed = parser.parse(m3u);
 
-    channels = parsed.items.map((item, index) => {
+    parsed.items.forEach((item, index) => {
         const id = `shannyiptv_${index}`;
         const name = item.name || `Channel ${index}`;
         const logo = item.tvg.logo;
         const group = item.group.title || 'Uncategorized';
         const url = item.url;
 
-        if (!categories[group]) categories[group] = [];
-        categories[group].push({ id, name, logo, url, group });
+        const channel = { id, name, logo, url, group };
+        channels.push(channel);
 
-        return { id, name, logo, url, group };
+        if (!categories[group]) categories[group] = [];
+        categories[group].push(channel);
     });
 }
 
 async function loadEPG() {
     try {
+        if (!EPG_URL) return;
         const res = await fetch(EPG_URL);
         const xml = await res.text();
-        const result = await xml2js.parseStringPromise(xml);
-        const epg = {};
-
-        if (result.tv && result.tv.programme) {
-            result.tv.programme.forEach((program) => {
-                const channel = program.$.channel;
-                const title = program.title?.[0]?._ || '';
-                const start = program.$.start;
-                const stop = program.$.stop;
-
-                if (!epg[channel]) epg[channel] = [];
-                epg[channel].push({ title, start, stop });
+        const parsed = await xml2js.parseStringPromise(xml);
+        if (parsed.tv && parsed.tv.programme) {
+            parsed.tv.programme.forEach((p) => {
+                const channelId = p.$.channel;
+                if (!epgData[channelId]) epgData[channelId] = [];
+                epgData[channelId].push({
+                    title: p.title?.[0]?._ || '',
+                    start: p.$.start,
+                    stop: p.$.stop
+                });
             });
         }
-
-        epgData = epg;
     } catch (err) {
         console.error('Failed to load EPG:', err.message);
     }
@@ -76,98 +74,90 @@ function getNowNext(channelId) {
     };
 }
 
-const builder = new addonBuilder({
-    id: 'org.shanny.iptv',
-    version: '1.0.0',
-    name: 'Shanny IPTV',
-    description: 'Watch live TV channels with category filtering',
-    types: ['tv'],
-    catalogs: [],
-    resources: ['catalog', 'stream', 'meta'],
-    idPrefixes: ['shannyiptv_'],
-    behaviorHints: {
-        configurable: false,
-        configurationRequired: false
-    }
-});
-
-builder.defineCatalogHandler(({ id, extra }) => {
-    const genre = extra.genre || 'All Channels';
-
-    let items = [];
-    if (genre === 'All Channels') {
-        items = channels;
-    } else {
-        items = categories[genre] || [];
-    }
-
-    return Promise.resolve({
-        metas: items.map(c => {
-            const nowNext = getNowNext(c.name) || {};
-            return {
-                id: c.id,
-                type: 'tv',
-                name: `${c.name}${nowNext.now ? ` | Now: ${nowNext.now}` : ''}`,
-                poster: c.logo || '',
-                background: c.logo || '',
-                genres: [c.group]
-            };
-        })
-    });
-});
-
-builder.defineStreamHandler(({ id }) => {
-    const stream = channels.find(c => c.id === id);
-    if (!stream) return Promise.resolve({ streams: [] });
-
-    return Promise.resolve({
-        streams: [{
-            title: stream.name,
-            url: stream.url,
-            externalUrl: true
-        }]
-    });
-});
-
-builder.defineMetaHandler(({ id }) => {
-    const channel = channels.find(c => c.id === id);
-    if (!channel) return Promise.resolve({ meta: {} });
-
-    return Promise.resolve({
-        meta: {
-            id: channel.id,
-            type: 'tv',
-            name: channel.name,
-            poster: channel.logo || '',
-            background: channel.logo || '',
-            genres: [channel.group]
-        }
-    });
-});
-
+// Initialize builder only after loading playlist
 async function start() {
     await loadPlaylist();
     await loadEPG();
 
-    // Add "All Channels" as the main catalog and each group as a genre filter
-    builder.manifest.catalogs = [
-        {
-            type: 'tv',
-            id: 'shannyiptv',
-            name: 'Shanny IPTV',
-            extra: [
-                {
-                    name: 'genre',
-                    isRequired: false,
-                    options: ['All Channels', ...Object.keys(categories)]
-                }
-            ]
-        }
-    ];
+    const builder = new addonBuilder({
+        id: 'org.shanny.iptv',
+        version: '1.0.0',
+        name: 'Shanny IPTV',
+        description: 'Live TV channels with categories and now/next support',
+        types: ['tv'],
+        resources: ['catalog', 'stream', 'meta'],
+        idPrefixes: ['shannyiptv_'],
+        behaviorHints: {
+            configurable: false,
+            configurationRequired: false
+        },
+        catalogs: [
+            {
+                type: 'tv',
+                id: 'shannyiptv',
+                name: 'Shanny IPTV',
+                extra: [
+                    {
+                        name: 'genre',
+                        isRequired: false,
+                        options: ['All Channels', ...Object.keys(categories)]
+                    }
+                ]
+            }
+        ]
+    });
+
+    builder.defineCatalogHandler(({ id, extra }) => {
+        const genre = extra.genre || 'All Channels';
+        const filtered = genre === 'All Channels' ? channels : categories[genre] || [];
+
+        const metas = filtered.map(channel => {
+            const nowNext = getNowNext(channel.name) || {};
+            return {
+                id: channel.id,
+                type: 'tv',
+                name: `${channel.name}${nowNext.now ? ` | Now: ${nowNext.now}` : ''}`,
+                poster: channel.logo,
+                background: channel.logo,
+                genres: [channel.group]
+            };
+        });
+
+        return Promise.resolve({ metas });
+    });
+
+    builder.defineStreamHandler(({ id }) => {
+        const stream = channels.find(c => c.id === id);
+        if (!stream) return Promise.resolve({ streams: [] });
+
+        return Promise.resolve({
+            streams: [{
+                title: stream.name,
+                url: stream.url,
+                externalUrl: true
+            }]
+        });
+    });
+
+    builder.defineMetaHandler(({ id }) => {
+        const channel = channels.find(c => c.id === id);
+        if (!channel) return Promise.resolve({ meta: {} });
+
+        return Promise.resolve({
+            meta: {
+                id: channel.id,
+                type: 'tv',
+                name: channel.name,
+                poster: channel.logo,
+                background: channel.logo,
+                genres: [channel.group]
+            }
+        });
+    });
 
     const PORT = process.env.PORT || 7000;
     http.createServer(serveHTTP(builder.getInterface())).listen(PORT, () => {
-        console.log(`🚀 Shanny IPTV addon running on port ${PORT}`);
+        console.log(`✅ Shanny IPTV Addon running on port ${PORT}`);
     });
 }
 
