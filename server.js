@@ -1,8 +1,11 @@
-import { serveHTTP, addonBuilder } from 'stremio-addon-sdk';
+import sdk from 'stremio-addon-sdk';
 import fetch from 'node-fetch';
 import parser from 'iptv-playlist-parser';
 import xml2js from 'xml2js';
 import dayjs from 'dayjs';
+
+const { serveHTTP, addonBuilder } = sdk;
+
 
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
