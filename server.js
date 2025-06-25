@@ -23,9 +23,9 @@ async function loadPlaylist() {
     const group = item.group.title || 'Other';
 
     if (!categories[group]) categories[group] = [];
-    categories[group].push({ ...item, id });
+    categories[group].push({ ...item, id, category: group });
 
-    return { ...item, id };
+    return { ...item, id, category: group };
   });
 }
 
@@ -35,7 +35,7 @@ async function loadEPG() {
     const xml = await res.text();
     const result = await xml2js.parseStringPromise(xml);
 
-    if (result && result.tv && result.tv.programme) {
+    if (result?.tv?.programme) {
       for (const prog of result.tv.programme) {
         const channelId = prog.$.channel;
         if (!epg[channelId]) epg[channelId] = [];
@@ -67,36 +67,37 @@ function buildAddon() {
     id: 'org.shanny.iptv',
     version: '1.0.0',
     name: 'Shanny IPTV',
-    description: 'Custom IPTV addon with EPG and category layout',
+    description: 'Custom IPTV addon with categories and EPG',
     logo: 'https://i.imgur.com/IpwEKkP.png',
     resources: ['catalog', 'stream', 'meta'],
     types: ['tv'],
-    catalogs: Object.keys(categories).map(cat => ({
+    catalogs: [{
       type: 'tv',
-      id: `shannyiptv_${cat}`,
-      name: cat,
-    })),
-    idPrefixes: ['shannyiptv_'],
+      id: 'shannyiptv',
+      name: 'Shanny IPTV',
+      extra: [{ name: 'genre', options: Object.keys(categories), isRequired: false }],
+    }],
+    idPrefixes: ['shannyiptv_']
   };
 
   builder = new addonBuilder(manifest);
 
-  builder.defineCatalogHandler(({ id }) => {
-    const catName = id.replace('shannyiptv_', '');
-    const metas = (categories[catName] || []).map(item => {
-      const { id, name, logo, tvg } = item;
-      const { current, next } = getNowNext(item);
-      const title = current ? `${name} - Now: ${current.title}` : name;
+  builder.defineCatalogHandler(({ extra }) => {
+    const genre = extra?.genre;
+    const filtered = genre ? categories[genre] || [] : channels;
 
+    const metas = filtered.map(item => {
+      const { current, next } = getNowNext(item);
       return {
-        id,
+        id: item.id,
         type: 'tv',
-        name: title,
-        poster: logo || null,
-        background: logo || null,
+        name: current ? `${item.name} - Now: ${current.title}` : item.name,
+        poster: item.logo,
+        background: item.logo,
         description: next ? `Next: ${next.title}` : '',
       };
     });
+
     return Promise.resolve({ metas });
   });
 
@@ -105,15 +106,16 @@ function buildAddon() {
     if (!channel) return Promise.resolve({ meta: {} });
 
     const { current, next } = getNowNext(channel);
-    const meta = {
-      id: channel.id,
-      type: 'tv',
-      name: channel.name,
-      poster: channel.logo,
-      background: channel.logo,
-      description: current ? `Now: ${current.title}` : '',
-    };
-    return Promise.resolve({ meta });
+    return Promise.resolve({
+      meta: {
+        id,
+        type: 'tv',
+        name: channel.name,
+        poster: channel.logo,
+        background: channel.logo,
+        description: current ? `Now: ${current.title}` : '',
+      }
+    });
   });
 
   builder.defineStreamHandler(({ id }) => {
@@ -126,8 +128,8 @@ function buildAddon() {
         streams: [{
           title: channel.name,
           url: streamUrl,
-          externalUrl: true,
-        }],
+          externalUrl: true
+        }]
       });
     } catch (err) {
       console.error('Invalid URL:', channel.url);
@@ -141,12 +143,10 @@ function buildAddon() {
 (async () => {
   try {
     await loadPlaylist();
-    loadEPG(); // lazy-load, no await
+    loadEPG(); // lazy
     const addonInterface = buildAddon();
-    require('http').createServer((req, res) => {
-      addonInterface(req, res);
-    }).listen(process.env.PORT || 10000, () => {
-      console.log('✅ Shanny IPTV Addon running on port', process.env.PORT || 10000);
+    require('http').createServer((req, res) => addonInterface(req, res)).listen(process.env.PORT || 10000, () => {
+      console.log(`✅ Shanny IPTV Addon running on port ${process.env.PORT || 10000}`);
     });
   } catch (e) {
     console.error('❌ Error starting addon:', e);
