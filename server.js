@@ -4,8 +4,12 @@ const parser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const dayjs = require('dayjs');
 
-const M3U_URL = 'YOUR_M3U_URL_HERE'; // Replace with your actual M3U URL
-const EPG_URL = 'YOUR_EPG_URL_HERE'; // Optional, for now/next info
+const M3U_URL = process.env.M3U_URL;
+const EPG_URL = process.env.EPG_URL;
+
+if (!M3U_URL || !EPG_URL) {
+    throw new Error("M3U_URL and/or EPG_URL environment variables are not set");
+}
 
 const builder = new addonBuilder({
   id: 'org.shanny.iptv',
