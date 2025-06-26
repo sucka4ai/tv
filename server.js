@@ -147,7 +147,9 @@ async function buildAddon() {
             streams: [{
                 url: ch.url,
                 title: ch.name,
-                externalUrl: true // ✅ Direct playback & prevent Stremio from proxying
+                behaviorHints: {
+                    notWebReady: true // prevents freezing and forces direct stream handling
+                }
             }]
         });
     });
@@ -157,7 +159,7 @@ async function buildAddon() {
 
 buildAddon().then(addon => {
     serveHTTP(addon, { port: process.env.PORT || 7000 });
-    console.log('✅ Shanny IPTV Addon running with filter support...');
+    console.log('✅ Shanny IPTV Addon running with optimized streaming...');
 }).catch(err => {
     console.error('❌ Failed to start addon:', err);
 });
