@@ -3,19 +3,16 @@ const fetch = require('node-fetch');
 const parser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const dayjs = require('dayjs');
-const express = require('express');
-const http = require('http');
 
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
-const PORT = process.env.PORT || 7000;
 
 let channels = [];
 let epgData = {};
 let categories = new Set();
 
 async function fetchM3U() {
-    const res = await fetch(M3U_URL);
+    const res = await fetch(M3U_URL, { timeout: 10000 });
     const text = await res.text();
     const parsed = parser.parse(text);
     channels = parsed.items.map((item, index) => {
@@ -33,12 +30,11 @@ async function fetchM3U() {
 }
 
 async function fetchEPG() {
-    const res = await fetch(EPG_URL);
+    const res = await fetch(EPG_URL, { timeout: 10000 });
     const xml = await res.text();
     const result = await xml2js.parseStringPromise(xml);
     const programs = result.tv.programme || [];
     epgData = {};
-
     for (const program of programs) {
         const channelId = program.$.channel;
         if (!epgData[channelId]) epgData[channelId] = [];
@@ -79,12 +75,12 @@ async function buildAddon() {
     await fetchM3U();
     await fetchEPG();
 
-    const categoryList = Array.from(categories).sort();
+    const genreOptions = Array.from(categories).sort();
     const manifest = {
         id: 'community.shannyiptv',
         version: '1.0.0',
         name: 'Shanny IPTV',
-        description: 'IPTV with EPG and category filtering',
+        description: 'IPTV with category filtering and EPG',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg',
         resources: ['catalog', 'stream', 'meta'],
         types: ['tv'],
@@ -92,7 +88,7 @@ async function buildAddon() {
             type: 'tv',
             id: 'shannyiptv',
             name: 'Shanny IPTV',
-            extra: [{ name: 'genre', isRequired: false, options: ['All', ...categoryList] }]
+            extra: [{ name: 'genre', options: ['All', ...genreOptions] }]
         }],
         idPrefixes: ['channel-']
     };
@@ -100,9 +96,10 @@ async function buildAddon() {
     const builder = new addonBuilder(manifest);
 
     builder.defineCatalogHandler(({ extra }) => {
-        let filtered = channels;
         const genre = extra?.genre;
-        if (genre && genre !== 'All') filtered = filtered.filter(ch => ch.category === genre);
+        const filtered = (genre && genre !== 'All')
+            ? channels.filter(ch => ch.category === genre)
+            : channels;
 
         return Promise.resolve({
             metas: filtered.map(ch => ({
@@ -140,11 +137,7 @@ async function buildAddon() {
             streams: [{
                 url: ch.url,
                 title: ch.name,
-                externalUrl: true,
-                behaviorHints: {
-                    notWebReady: false,
-                    proxyHeaders: { 'Connection': 'keep-alive', 'Cache-Control': 'no-cache' }
-                }
+                externalUrl: true  // Direct stream, prevents freezing
             }]
         });
     });
@@ -153,12 +146,9 @@ async function buildAddon() {
 }
 
 buildAddon().then(addon => {
-    const app = express();
-    const server = http.createServer(app);
-    serveHTTP(addon, { server });
-    server.listen(PORT, () => {
-        console.log(`✅ Shanny IPTV Addon running on port ${PORT}`);
-    });
+    const port = process.env.PORT || 7000;
+    serveHTTP(addon, { port });
+    console.log(`✅ Shanny IPTV Addon running on port ${port}`);
 }).catch(err => {
     console.error('❌ Failed to start addon:', err);
 });
