@@ -103,7 +103,7 @@ const manifest = {
             type: "tv",
             id: "shannyiptv",
             name: "Shanny IPTV",
-            extra: [{ name: "genre", options: ["All"] }], // updated later
+            extra: [{ name: "genre", options: ["All"] }], // updated after M3U load
         },
     ],
     idPrefixes: ["channel-"],
@@ -161,28 +161,31 @@ builder.defineStreamHandler(({ id }) => {
             {
                 url: ch.url,
                 title: ch.name,
-                externalUrl: true, // prevents freezing in some clients
+                externalUrl: true,
             },
         ],
     });
 });
 
-// ---------------- START SERVER ----------------
+// ---------------- STARTUP ----------------
 
-const port = process.env.PORT || 7000;
-
-serveHTTP(builder.getInterface(), { port });
-console.log(`🚀 Shanny IPTV Addon running on port ${port}`);
-
-// Fetch M3U/EPG in background (after server starts)
 (async () => {
+    // Preload data before serving manifest
     await fetchM3U();
     await fetchEPG();
 
-    // Update manifest genres once categories are known
-    manifest.catalogs[0].extra[0].options = [
-        "All",
-        ...Array.from(categories).sort(),
-    ];
-    console.log("✅ Manifest categories updated:", manifest.catalogs[0].extra[0].options);
+    // Update manifest with categories if available
+    if (categories.size > 0) {
+        manifest.catalogs[0].extra[0].options = [
+            "All",
+            ...Array.from(categories).sort(),
+        ];
+        console.log("✅ Manifest categories updated:", manifest.catalogs[0].extra[0].options);
+    } else {
+        console.log("⚠️ No categories loaded, using default 'All' only");
+    }
+
+    const port = process.env.PORT || 7000;
+    serveHTTP(builder.getInterface(), { port });
+    console.log(`🚀 Shanny IPTV Addon running on port ${port}`);
 })();
