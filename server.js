@@ -1,10 +1,10 @@
-const express = require("express");
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
 const parser = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
 const dayjs = require("dayjs");
 
+// Environment variables
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
 
@@ -12,7 +12,7 @@ let channels = [];
 let epgData = {};
 let categories = new Set();
 
-// ---------------- FETCH M3U ----------------
+// ---------------- FETCH FUNCTIONS ----------------
 async function fetchM3U() {
   try {
     const res = await fetch(M3U_URL, { timeout: 15000 });
@@ -23,7 +23,6 @@ async function fetchM3U() {
     channels = parsed.items.map((item, index) => {
       const category = item.group?.title || "Uncategorized";
       categories.add(category);
-
       return {
         id: `channel-${index}`,
         name: item.name,
@@ -40,7 +39,6 @@ async function fetchM3U() {
   }
 }
 
-// ---------------- FETCH EPG ----------------
 async function fetchEPG() {
   try {
     const res = await fetch(EPG_URL, { timeout: 15000 });
@@ -68,7 +66,7 @@ async function fetchEPG() {
   }
 }
 
-// ---------------- HELPER FUNCTIONS ----------------
+// ---------------- HELPERS ----------------
 function getNowNext(channelId) {
   const now = dayjs();
   const programs = epgData[channelId] || [];
@@ -78,7 +76,6 @@ function getNowNext(channelId) {
   for (let i = 0; i < programs.length; i++) {
     const start = dayjs(programs[i].start, "YYYYMMDDHHmmss ZZ");
     const end = dayjs(programs[i].stop, "YYYYMMDDHHmmss ZZ");
-
     if (now.isAfter(start) && now.isBefore(end)) {
       nowProgram = programs[i];
       nextProgram = programs[i + 1] || null;
@@ -114,12 +111,12 @@ const manifest = {
   idPrefixes: ["channel-"],
 };
 
+// ---------------- ADDON BUILDER ----------------
 const builder = new addonBuilder(manifest);
 
-// ---------------- CATALOG HANDLER ----------------
+// ---------------- HANDLERS ----------------
 builder.defineCatalogHandler(({ extra }) => {
   const genre = extra?.genre;
-
   const filtered =
     genre && genre !== "All"
       ? channels.filter((ch) => ch.category === genre)
@@ -137,13 +134,11 @@ builder.defineCatalogHandler(({ extra }) => {
   });
 });
 
-// ---------------- META HANDLER ----------------
 builder.defineMetaHandler(({ id }) => {
   const ch = channels.find((c) => c.id === id);
   if (!ch) return Promise.resolve({ meta: {} });
 
   const epg = getNowNext(ch.tvgId);
-
   return Promise.resolve({
     meta: {
       id: ch.id,
@@ -159,7 +154,6 @@ builder.defineMetaHandler(({ id }) => {
   });
 });
 
-// ---------------- STREAM HANDLER ----------------
 builder.defineStreamHandler(({ id }) => {
   const ch = channels.find((c) => c.id === id);
   if (!ch) return Promise.resolve({ streams: [] });
@@ -175,7 +169,7 @@ builder.defineStreamHandler(({ id }) => {
   });
 });
 
-// ---------------- SERVER START ----------------
+// ---------------- DEPLOY ----------------
 (async () => {
   await fetchM3U();
   await fetchEPG();
@@ -191,23 +185,22 @@ builder.defineStreamHandler(({ id }) => {
     );
   }
 
-  // ---------------- EXPRESS FOR MANIFEST ----------------
-  const app = express();
-
-  // Serve manifest.json for browser/Stremio
-  app.get("/manifest.json", (req, res) => {
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.end(JSON.stringify(manifest));
-  });
-
   const PORT = process.env.PORT || 7000;
 
-  // Start Express server
-  app.listen(PORT, () => {
-    console.log(`🚀 Manifest server running on port ${PORT}`);
+  // Add manifest.json route to addon interface
+  const addonInterface = builder.getInterface();
+  const originalOnRequest = addonInterface.onRequest;
+  addonInterface.onRequest = (req, res) => {
+    if (req.url === "/manifest.json") {
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.end(JSON.stringify(manifest));
+    } else if (originalOnRequest) {
+      originalOnRequest(req, res);
+    }
+  };
 
-    // Serve Stremio addon via SDK
-    serveHTTP(builder.getInterface(), { port: PORT });
-  });
+  // Start Stremio addon on single port (Render only allows one)
+  serveHTTP(addonInterface, { port: PORT });
+  console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
 })();
