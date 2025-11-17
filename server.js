@@ -1,4 +1,5 @@
-const { serveHTTP, addonBuilder } = require("stremio-addon-sdk");
+const express = require("express");
+const { addonBuilder } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
 const parser = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
@@ -11,7 +12,7 @@ let channels = [];
 let epgData = {};
 let categories = new Set();
 
-// ---------------- FETCH FUNCTIONS ----------------
+// ---------------- FETCH M3U ----------------
 
 async function fetchM3U() {
     try {
@@ -23,6 +24,7 @@ async function fetchM3U() {
         channels = parsed.items.map((item, index) => {
             const category = item.group?.title || "Uncategorized";
             categories.add(category);
+
             return {
                 id: `channel-${index}`,
                 name: item.name,
@@ -39,6 +41,8 @@ async function fetchM3U() {
     }
 }
 
+// ---------------- FETCH EPG ----------------
+
 async function fetchEPG() {
     try {
         const res = await fetch(EPG_URL, { timeout: 15000 });
@@ -47,9 +51,11 @@ async function fetchEPG() {
 
         const programs = result.tv.programme || [];
         epgData = {};
+
         for (const program of programs) {
             const channelId = program.$.channel;
             if (!epgData[channelId]) epgData[channelId] = [];
+
             epgData[channelId].push({
                 start: program.$.start,
                 stop: program.$.stop,
@@ -73,6 +79,7 @@ function getNowNext(channelId) {
     for (let i = 0; i < programs.length; i++) {
         const start = dayjs(programs[i].start, "YYYYMMDDHHmmss ZZ");
         const end = dayjs(programs[i].stop, "YYYYMMDDHHmmss ZZ");
+
         if (now.isAfter(start) && now.isBefore(end)) {
             nowProgram = programs[i];
             nextProgram = programs[i + 1] || null;
@@ -103,7 +110,7 @@ const manifest = {
             type: "tv",
             id: "shannyiptv",
             name: "Shanny IPTV",
-            extra: [{ name: "genre", options: ["All"] }], // updated after M3U load
+            extra: [{ name: "genre", options: ["All"] }],
         },
     ],
     idPrefixes: ["channel-"],
@@ -111,10 +118,11 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// ---------------- HANDLERS ----------------
+// ---------------- CATALOG HANDLER ----------------
 
 builder.defineCatalogHandler(({ extra }) => {
     const genre = extra?.genre;
+
     const filtered =
         genre && genre !== "All"
             ? channels.filter((ch) => ch.category === genre)
@@ -132,11 +140,15 @@ builder.defineCatalogHandler(({ extra }) => {
     });
 });
 
+// ---------------- META HANDLER ----------------
+
 builder.defineMetaHandler(({ id }) => {
     const ch = channels.find((c) => c.id === id);
-    if (!ch) return Promise.resolve({ meta: {} });
+    if (!ch)
+        return Promise.resolve({ meta: {} });
 
     const epg = getNowNext(ch.tvgId);
+
     return Promise.resolve({
         meta: {
             id: ch.id,
@@ -145,16 +157,17 @@ builder.defineMetaHandler(({ id }) => {
             logo: ch.logo,
             poster: ch.logo,
             background: getUnsplashImage(ch.category),
-            description: `${epg.now?.title || "No EPG"} — ${
-                epg.next?.title || "No info"
-            }`,
+            description: `${epg.now?.title || "No EPG"} — ${epg.next?.title || "No info"}`,
         },
     });
 });
 
+// ---------------- STREAM HANDLER ----------------
+
 builder.defineStreamHandler(({ id }) => {
     const ch = channels.find((c) => c.id === id);
-    if (!ch) return Promise.resolve({ streams: [] });
+    if (!ch)
+        return Promise.resolve({ streams: [] });
 
     return Promise.resolve({
         streams: [
@@ -167,25 +180,36 @@ builder.defineStreamHandler(({ id }) => {
     });
 });
 
-// ---------------- STARTUP ----------------
+// ---------------- EXPRESS SERVER ----------------
 
 (async () => {
-    // Preload data before serving manifest
     await fetchM3U();
     await fetchEPG();
 
-    // Update manifest with categories if available
     if (categories.size > 0) {
         manifest.catalogs[0].extra[0].options = [
             "All",
             ...Array.from(categories).sort(),
         ];
         console.log("✅ Manifest categories updated:", manifest.catalogs[0].extra[0].options);
-    } else {
-        console.log("⚠️ No categories loaded, using default 'All' only");
     }
 
+    const addonInterface = builder.getInterface();
+
+    const app = express();
+
+    // Serve manifest.json correctly
+    app.get("/manifest.json", (req, res) => {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.end(JSON.stringify(manifest));
+    });
+
+    // Serve addon interface
+    app.use("/", addonInterface);
+
     const port = process.env.PORT || 7000;
-    serveHTTP(builder.getInterface(), { port });
-    console.log(`🚀 Shanny IPTV Addon running on port ${port}`);
+    app.listen(port, () => {
+        console.log(`🚀 Shanny IPTV Addon running on port ${port}`);
+    });
 })();
