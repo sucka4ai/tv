@@ -3,9 +3,7 @@ const fetch = require("node-fetch");
 const parser = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
 const dayjs = require("dayjs");
-const http = require("http");
 
-// ---------------- CONFIG ----------------
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
 
@@ -117,7 +115,6 @@ const manifest = {
 // ---------------- ADDON BUILDER ----------------
 const builder = new addonBuilder(manifest);
 
-// ---------------- HANDLERS ----------------
 builder.defineCatalogHandler(({ extra }) => {
   const genre = extra?.genre;
   const filtered =
@@ -172,7 +169,7 @@ builder.defineStreamHandler(({ id }) => {
   });
 });
 
-// ---------------- SERVER ----------------
+// ---------------- START SERVER ----------------
 (async () => {
   await fetchM3U();
   await fetchEPG();
@@ -189,26 +186,7 @@ builder.defineStreamHandler(({ id }) => {
   }
 
   const PORT = process.env.PORT || 7000;
-  const addonInterface = builder.getInterface();
-
-  const server = http.createServer((req, res) => {
-    const path = req.url.split("?")[0];
-
-    if (path === "/manifest.json") {
-      res.writeHead(200, {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      });
-      res.end(JSON.stringify(manifest));
-    } else {
-      serveHTTP(addonInterface, { httpServer: { req, res }, verbose: false });
-    }
-  });
-
-  server.listen(PORT, () => {
-    console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
-    console.log(
-      `🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`
-    );
-  });
+  serveHTTP(builder.getInterface(), { port: PORT, verbose: false });
+  console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
+  console.log(`🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`);
 })();
