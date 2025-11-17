@@ -1,4 +1,4 @@
-const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
+  const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
 const parser = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
@@ -191,7 +191,7 @@ builder.defineStreamHandler(({ id }) => {
   const PORT = process.env.PORT || 7000;
   const addonInterface = builder.getInterface();
 
-  // Wrap in HTTP server to serve both manifest.json and addon SDK
+  // HTTP server wrapper
   const server = http.createServer((req, res) => {
     const path = req.url.split("?")[0];
 
@@ -202,8 +202,8 @@ builder.defineStreamHandler(({ id }) => {
       });
       res.end(JSON.stringify(manifest));
     } else {
-      // Correctly delegate to serveHTTP
-      serveHTTP(addonInterface, { port: PORT, httpServer: { req, res } });
+      // Properly handle Stremio requests via serveHTTP
+      serveHTTP(addonInterface, { httpServer: { req, res } });
     }
   });
 
