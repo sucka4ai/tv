@@ -191,7 +191,6 @@ builder.defineStreamHandler(({ id }) => {
   const PORT = process.env.PORT || 7000;
   const addonInterface = builder.getInterface();
 
-  // HTTP server wrapper
   const server = http.createServer((req, res) => {
     const path = req.url.split("?")[0];
 
@@ -202,15 +201,14 @@ builder.defineStreamHandler(({ id }) => {
       });
       res.end(JSON.stringify(manifest));
     } else {
-      // Properly handle Stremio requests
-      serveHTTP(addonInterface, { httpServer: { req, res } });
+      serveHTTP(addonInterface, { httpServer: { req, res }, verbose: false });
     }
   });
 
   server.listen(PORT, () => {
     console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
     console.log(
-      `🔗 Manifest available at https://<your-render-app>.onrender.com/manifest.json`
+      `🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`
     );
   });
 })();
