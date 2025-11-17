@@ -1,10 +1,11 @@
-const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
+      const { addonBuilder } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
 const parser = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
 const dayjs = require("dayjs");
+const http = require("http");
 
-// Environment variables
+// ---------------- CONFIG ----------------
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
 
@@ -41,6 +42,7 @@ async function fetchM3U() {
 
 async function fetchEPG() {
   try {
+    if (!EPG_URL) throw new Error("EPG_URL not provided");
     const res = await fetch(EPG_URL, { timeout: 15000 });
     const xml = await res.text();
     const result = await xml2js.parseStringPromise(xml);
@@ -62,7 +64,8 @@ async function fetchEPG() {
 
     console.log(`✅ Loaded EPG with ${programs.length} programmes`);
   } catch (err) {
-    console.error("❌ Failed to fetch EPG:", err.message);
+    console.warn("⚠️ Skipping EPG load:", err.message);
+    epgData = {};
   }
 }
 
@@ -169,7 +172,7 @@ builder.defineStreamHandler(({ id }) => {
   });
 });
 
-// ---------------- DEPLOY ----------------
+// ---------------- SERVER ----------------
 (async () => {
   await fetchM3U();
   await fetchEPG();
@@ -187,20 +190,25 @@ builder.defineStreamHandler(({ id }) => {
 
   const PORT = process.env.PORT || 7000;
 
-  // Add manifest.json route to addon interface
+  // Use http.createServer to serve both manifest.json and addon interface
   const addonInterface = builder.getInterface();
-  const originalOnRequest = addonInterface.onRequest;
-  addonInterface.onRequest = (req, res) => {
-    if (req.url === "/manifest.json") {
-      res.setHeader("Content-Type", "application/json");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.end(JSON.stringify(manifest));
-    } else if (originalOnRequest) {
-      originalOnRequest(req, res);
-    }
-  };
 
-  // Start Stremio addon on single port (Render only allows one)
-  serveHTTP(addonInterface, { port: PORT });
-  console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
+  const server = http.createServer((req, res) => {
+    const path = req.url.split("?")[0]; // ignore query strings
+
+    if (path === "/manifest.json") {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(manifest));
+    } else {
+      addonInterface(req, res); // Stremio SDK handles the rest
+    }
+  });
+
+  server.listen(PORT, () => {
+    console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
+    console.log(`🔗 Manifest available at /manifest.json`);
+  });
 })();
