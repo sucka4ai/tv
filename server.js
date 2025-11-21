@@ -12,8 +12,7 @@ let channels = [];
 let epgData = {};
 let categories = new Set();
 
-
-// ---------------- FETCH FUNCTIONS ----------------
+// ---------------- FETCH M3U ----------------
 async function fetchM3U() {
   try {
     const res = await fetch(M3U_URL, { timeout: 15000 });
@@ -40,6 +39,7 @@ async function fetchM3U() {
   }
 }
 
+// ---------------- FETCH EPG ----------------
 async function fetchEPG() {
   try {
     if (!EPG_URL) throw new Error("EPG_URL not provided");
@@ -69,7 +69,6 @@ async function fetchEPG() {
   }
 }
 
-
 // ---------------- HELPERS ----------------
 function getNowNext(channelId) {
   const now = dayjs();
@@ -95,7 +94,6 @@ function getUnsplashImage(category) {
   return `https://source.unsplash.com/1600x900/?${encoded}`;
 }
 
-
 // ---------------- MANIFEST ----------------
 const manifest = {
   id: "community.shannyiptv",
@@ -116,10 +114,10 @@ const manifest = {
   idPrefixes: ["channel-"],
 };
 
-
 // ---------------- ADDON BUILDER ----------------
 const builder = new addonBuilder(manifest);
 
+// catalog
 builder.defineCatalogHandler(({ extra }) => {
   const genre = extra?.genre;
   const filtered =
@@ -139,11 +137,13 @@ builder.defineCatalogHandler(({ extra }) => {
   });
 });
 
+// meta
 builder.defineMetaHandler(({ id }) => {
   const ch = channels.find((c) => c.id === id);
   if (!ch) return Promise.resolve({ meta: {} });
 
   const epg = getNowNext(ch.tvgId);
+
   return Promise.resolve({
     meta: {
       id: ch.id,
@@ -152,13 +152,12 @@ builder.defineMetaHandler(({ id }) => {
       logo: ch.logo,
       poster: ch.logo,
       background: getUnsplashImage(ch.category),
-      description: `${epg.now?.title || "No EPG"} — ${
-        epg.next?.title || "No info"
-      }`,
+      description: `${epg.now?.title || "No EPG"} — ${epg.next?.title || "No info"}`,
     },
   });
 });
 
+// stream
 builder.defineStreamHandler(({ id }) => {
   const ch = channels.find((c) => c.id === id);
   if (!ch) return Promise.resolve({ streams: [] });
@@ -167,15 +166,13 @@ builder.defineStreamHandler(({ id }) => {
     streams: [
       {
         url: ch.url,
-        title: ch.name,
         externalUrl: true,
       },
     ],
   });
 });
 
-
-// ---------------- SERVER START ----------------
+// ---------------- START SERVER ----------------
 (async () => {
   await fetchM3U();
   await fetchEPG();
@@ -185,22 +182,18 @@ builder.defineStreamHandler(({ id }) => {
       "All",
       ...Array.from(categories).sort(),
     ];
-    console.log(
-      "✅ Manifest categories updated:",
-      manifest.catalogs[0].extra[0].options
-    );
+    console.log("✅ Manifest categories updated:", manifest.catalogs[0].extra[0].options);
   }
 
   const app = express();
 
-  // serveHTTP attaches the addon API endpoints to Express
-  serveHTTP(builder.getInterface(), app);
+  // IMPORTANT FIX: Correct serveHTTP usage
+  serveHTTP(builder.getInterface(), { app });
 
-  // -------- FIX: Use Render's assigned port --------
   const PORT = process.env.PORT || 7000;
 
   app.listen(PORT, () => {
     console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
-    console.log(`🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`);
+    console.log(`🔗 Manifest URL: https://stremio-addon-qrrt.onrender.com/manifest.json`);
   });
 })();
