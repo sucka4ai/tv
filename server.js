@@ -188,13 +188,16 @@ builder.defineStreamHandler(({ id }) => {
 
   const app = express();
 
-  // ✅ FIXED: Attach addon correctly as Express middleware
-  app.use(serveHTTP(builder.getInterface()));
+  // ✅ FIXED: Attach Stremio addon endpoints correctly
+  const addonMiddleware = serveHTTP(builder.getInterface());
+  app.use(addonMiddleware);
 
   // -------- Render port --------
   const PORT = process.env.PORT || 7000;
   app.listen(PORT, () => {
     console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
-    console.log(`🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`);
+    console.log(
+      `🔗 Manifest URL: https://${process.env.RENDER_EXTERNAL_HOSTNAME}/manifest.json`
+    );
   });
 })();
