@@ -6,13 +6,12 @@ const xml2js = require("xml2js");
 const dayjs = require("dayjs");
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
-const M3U_URL = process.env.M3U_URL;
-const EPG_URL = process.env.EPG_URL;
+const M3U_URL = process.env.M3U_URL || null;
+const EPG_URL = process.env.EPG_URL || null;
 
-if (!M3U_URL || !EPG_URL) {
-  console.error("ERROR: Please set M3U_URL and EPG_URL environment variables");
-  process.exit(1);
-}
+// ❗ DO NOT EXIT — allow addon to run even with missing URLs
+if (!M3U_URL) console.warn("⚠️ WARNING: M3U_URL is NOT set. No live channels will load.");
+if (!EPG_URL) console.warn("⚠️ WARNING: EPG_URL is NOT set. No EPG data will load.");
 
 const manifest = {
   id: "org.example.iptv",
@@ -31,32 +30,44 @@ const manifest = {
   ]
 };
 
-
-
 const builder = new addonBuilder(manifest);
 
 let channels = [];
 let epgData = {};
 
 async function loadChannels() {
+  if (!M3U_URL) {
+    console.warn("⚠️ Skipping channel load — M3U_URL not provided.");
+    channels = [];
+    return;
+  }
+
   try {
     const res = await fetch(M3U_URL);
     const text = await res.text();
-    channels = iptvParser.parse(text).items;
+    channels = iptvParser.parse(text).items || [];
+    console.log(`✅ Loaded ${channels.length} channels`);
   } catch (e) {
-    console.error("Failed to load or parse M3U:", e);
+    console.error("❌ Failed to load or parse M3U:", e.message);
     channels = [];
   }
 }
 
 async function loadEPG() {
+  if (!EPG_URL) {
+    console.warn("⚠️ Skipping EPG load — EPG_URL not provided.");
+    epgData = {};
+    return;
+  }
+
   try {
     const res = await fetch(EPG_URL);
     const text = await res.text();
     const result = await xml2js.parseStringPromise(text);
-    epgData = result;
+    epgData = result || {};
+    console.log("✅ EPG loaded");
   } catch (e) {
-    console.error("Failed to load or parse EPG XML:", e);
+    console.error("❌ Failed to load or parse EPG XML:", e.message);
     epgData = {};
   }
 }
@@ -83,32 +94,44 @@ setInterval(async () => {
   await loadEPG();
 }, 10 * 60 * 1000);
 
-builder.defineCatalogHandler(async ({ id, extra, skip, limit }) => {
-  // Return all channels as metas with IPTV prefix + channel id
+// ----------------------
+// CATALOG HANDLER
+// ----------------------
+builder.defineCatalogHandler(async () => {
+
+  // If no M3U_URL set → return empty safe catalog
+  if (!channels.length) {
+    return { metas: [] };
+  }
+
   return {
     metas: channels.map(channel => ({
-      id: `iptv:${channel.tvgId || channel.name}`, // unique id for meta
+      id: `iptv:${channel.tvgId || channel.name}`,
       type: "tv",
       name: channel.name,
       poster: channel.tvgLogo || undefined,
       posterShape: "default",
-      releaseInfo: undefined,
       description: channel.name,
     })),
   };
 });
 
+// ----------------------
+// META HANDLER
+// ----------------------
 builder.defineMetaHandler(async ({ id }) => {
-  // id format: iptv:<channelId>
-  if (!id.startsWith("iptv:")) return null;
-  const channelId = id.slice(5);
-  const channel = channels.find(c => (c.tvgId || c.name) === channelId);
-  if (!channel) return null;
 
-  // Find EPG channel info (optional)
+  if (!id.startsWith("iptv:")) return null;
+
+  const channelId = id.replace("iptv:", "");
+  const channel = channels.find(c => (c.tvgId || c.name) === channelId);
+
+  if (!channel) {
+    return { meta: { id, type: "tv", name: "Unknown Channel" } };
+  }
+
   const epgChannel = findChannelEPG(channel.tvgId || channel.name);
 
-  // Add EPG details if available
   return {
     meta: {
       id,
@@ -121,10 +144,16 @@ builder.defineMetaHandler(async ({ id }) => {
   };
 });
 
+// ----------------------
+// STREAM HANDLER
+// ----------------------
 builder.defineStreamHandler(async ({ id }) => {
+
   if (!id.startsWith("iptv:")) return { streams: [] };
-  const channelId = id.slice(5);
+
+  const channelId = id.replace("iptv:", "");
   const channel = channels.find(c => (c.tvgId || c.name) === channelId);
+
   if (!channel) return { streams: [] };
 
   return {
@@ -142,6 +171,11 @@ builder.defineStreamHandler(async ({ id }) => {
 
 const addonInterface = builder.getInterface();
 
+// ----------------------
+// RUN SERVER SAFELY
+// ----------------------
 serveHTTP(addonInterface, {
   port: process.env.PORT || 7000,
 });
+
+console.log(`🚀 IPTV Addon running on port ${process.env.PORT || 7000}`);
