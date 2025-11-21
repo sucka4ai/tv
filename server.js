@@ -1,3 +1,4 @@
+const express = require("express");
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
 const parser = require("iptv-playlist-parser");
@@ -10,6 +11,7 @@ const EPG_URL = process.env.EPG_URL;
 let channels = [];
 let epgData = {};
 let categories = new Set();
+
 
 // ---------------- FETCH FUNCTIONS ----------------
 async function fetchM3U() {
@@ -67,6 +69,7 @@ async function fetchEPG() {
   }
 }
 
+
 // ---------------- HELPERS ----------------
 function getNowNext(channelId) {
   const now = dayjs();
@@ -92,6 +95,7 @@ function getUnsplashImage(category) {
   return `https://source.unsplash.com/1600x900/?${encoded}`;
 }
 
+
 // ---------------- MANIFEST ----------------
 const manifest = {
   id: "community.shannyiptv",
@@ -111,6 +115,7 @@ const manifest = {
   ],
   idPrefixes: ["channel-"],
 };
+
 
 // ---------------- ADDON BUILDER ----------------
 const builder = new addonBuilder(manifest);
@@ -169,7 +174,8 @@ builder.defineStreamHandler(({ id }) => {
   });
 });
 
-// ---------------- START SERVER ----------------
+
+// ---------------- SERVER START ----------------
 (async () => {
   await fetchM3U();
   await fetchEPG();
@@ -185,8 +191,16 @@ builder.defineStreamHandler(({ id }) => {
     );
   }
 
+  const app = express();
+
+  // serveHTTP attaches the addon API endpoints to Express
+  serveHTTP(builder.getInterface(), app);
+
+  // -------- FIX: Use Render's assigned port --------
   const PORT = process.env.PORT || 7000;
-  serveHTTP(builder.getInterface(), { port: PORT, verbose: false });
-  console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
-  console.log(`🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`);
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
+    console.log(`🔗 Manifest URL: https://<your-render-app>.onrender.com/manifest.json`);
+  });
 })();
