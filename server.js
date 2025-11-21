@@ -188,11 +188,17 @@ builder.defineStreamHandler(({ id }) => {
 
   const app = express();
 
-  // ✅ FIXED: Attach Stremio addon endpoints correctly
-  const addonMiddleware = serveHTTP(builder.getInterface());
-  app.use(addonMiddleware);
+  // -------- SERVE MANIFEST & ADDON ----------
+  app.get("/manifest.json", (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.end(JSON.stringify(manifest));
+  });
 
-  // -------- Render port --------
+  // Attach Stremio addon endpoints as middleware
+  app.use(serveHTTP(builder.getInterface()));
+
+  // -------- RENDER PORT ----------
   const PORT = process.env.PORT || 7000;
   app.listen(PORT, () => {
     console.log(`🚀 Shanny IPTV Addon running on port ${PORT}`);
