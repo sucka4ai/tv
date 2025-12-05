@@ -1,5 +1,5 @@
 /**
- * Shanny IPTV Addon (v4) - One-click Stremio install + XC + M3U + Optional Env
+ * Shanny IPTV Addon (Full Updated) - M3U + XC + Optional Env + Simple UI + Stremio Install Button
  */
 const express = require('express');
 const fetch = require('node-fetch');
@@ -234,9 +234,9 @@ app.get('/addon/xc/manifest.json', async (req, res) => {
   }
 })();
 
-// ---------------- UI HOMEPAGE with One-click Install ----------------
+// ---------------- UI HOMEPAGE (Reverted + Manifest + Install button) ----------------
 app.get('/', (req, res) => {
-  const baseURL = process.env.BASE_URL || `https://localhost:7000`;
+  const baseURL = process.env.BASE_URL || `https://your-render-url.onrender.com`;
   res.send(`
   <!DOCTYPE html>
   <html lang="en">
@@ -248,13 +248,14 @@ app.get('/', (req, res) => {
   <body class="bg-gray-900 text-white p-8">
     <div class="max-w-xl mx-auto">
       <h1 class="text-3xl font-bold mb-4">Shanny IPTV Addon</h1>
+      
       <form class="space-y-4" onsubmit="event.preventDefault(); generateM3ULink();">
         <label class="block">Enter M3U URL:
           <input type="url" id="m3uUrl" class="w-full p-2 rounded text-black" placeholder="http://example.com/playlist.m3u" required>
         </label>
-        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 p-2 rounded">Generate Stremio M3U Install Link</button>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 p-2 rounded">Generate Manifest</button>
       </form>
-      <div id="m3uLink" class="mt-2"></div>
+      <div id="m3uResult" class="mt-4"></div>
 
       <form class="space-y-4 mt-6" onsubmit="event.preventDefault(); generateXCLink();">
         <label class="block">XC Username:
@@ -266,23 +267,36 @@ app.get('/', (req, res) => {
         <label class="block">XC Type:
           <input type="text" id="xcType" class="w-full p-2 rounded text-black" placeholder="m3u_plus (default)">
         </label>
-        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 p-2 rounded">Generate Stremio XC Install Link</button>
+        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 p-2 rounded">Generate Manifest</button>
       </form>
-      <div id="xcLink" class="mt-2"></div>
+      <div id="xcResult" class="mt-4"></div>
+
+      <p class="mt-6 text-gray-400 text-sm">
+        Copy the manifest URL to install manually in Stremio, or click the Install button to open Stremio directly.
+      </p>
     </div>
 
     <script>
       function generateM3ULink() {
         const url = encodeURIComponent(document.getElementById('m3uUrl').value);
-        const link = '${baseURL}/addon/m3u/manifest.json?m3uUrl=' + url;
-        document.getElementById('m3uLink').innerHTML = '<a href="stremio://addon?url=' + link + '" class="text-blue-400 underline">Click here to install M3U addon in Stremio</a>';
+        const manifestUrl = '${baseURL}/addon/m3u/manifest.json?m3uUrl=' + url;
+        const installLink = 'stremio://addon?url=' + manifestUrl;
+        document.getElementById('m3uResult').innerHTML = 
+          '<p>Manifest URL: <a href="' + manifestUrl + '" target="_blank" class="text-blue-400 underline">' + manifestUrl + '</a></p>' +
+          '<p><a href="' + installLink + '" class="bg-blue-500 hover:bg-blue-600 p-2 rounded inline-block mt-2">Install in Stremio</a></p>';
       }
+
       function generateXCLink() {
         const username = document.getElementById('xcUsername').value;
         const password = document.getElementById('xcPassword').value;
         const type = document.getElementById('xcType').value || 'm3u_plus';
-        const link = '${baseURL}/addon/xc/manifest.json?username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password) + '&type=' + encodeURIComponent(type);
-        document.getElementById('xcLink').innerHTML = '<a href="stremio://addon?url=' + link + '" class="text-green-400 underline">Click here to install XC addon in Stremio</a>';
+        const manifestUrl = '${baseURL}/addon/xc/manifest.json?username=' + encodeURIComponent(username) +
+                            '&password=' + encodeURIComponent(password) +
+                            '&type=' + encodeURIComponent(type);
+        const installLink = 'stremio://addon?url=' + manifestUrl;
+        document.getElementById('xcResult').innerHTML = 
+          '<p>Manifest URL: <a href="' + manifestUrl + '" target="_blank" class="text-green-400 underline">' + manifestUrl + '</a></p>' +
+          '<p><a href="' + installLink + '" class="bg-green-500 hover:bg-green-600 p-2 rounded inline-block mt-2">Install in Stremio</a></p>';
       }
     </script>
   </body>
