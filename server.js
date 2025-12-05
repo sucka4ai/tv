@@ -1,30 +1,29 @@
 // server.js
-// CommonJS, Node >= 24
-// Upgraded: dynamic multi-install endpoints (/m3u, /xc), Tailwind UI homepage, Unsplash backgrounds, Now/Next EPG
-// Preserves original static addon behavior driven by M3U_URL and EPG_URL env vars.
+// Node >=24, CommonJS
+//
+// - Keeps original env-mode addon (M3U_URL + EPG_URL)
+// - Adds dynamic multi-install endpoints under /addon/m3u and /addon/xc
+// - Serves Tailwind UI at /
+// - Carefully mounts stremio builder interface (guards against previous Router.use() error)
 
 const express = require('express');
 const fetch = require('node-fetch');
 const parser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const dayjs = require('dayjs');
-const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
+const { addonBuilder } = require('stremio-addon-sdk');
 const path = require('path');
-const querystring = require('querystring');
 
 const PORT = process.env.PORT || 7000;
-
-// --- Keep original env-driven behavior (unchanged) ---
 const M3U_URL = process.env.M3U_URL;
 const EPG_URL = process.env.EPG_URL;
 
-// local state for original addon
+// -------------------- Env-mode state (original addon) --------------------
 let channels = [];
 let epgData = {};
 let categories = new Set();
 
-// ---------------- ORIGINAL FETCH FUNCTIONS (kept) ----------------
-
+// -------------------- Helpers (kept/compatible with your original code) --------------------
 async function fetchM3UEnv() {
   if (!M3U_URL) {
     console.warn('⚠️ No M3U_URL provided in env, skipping preload');
@@ -32,7 +31,6 @@ async function fetchM3UEnv() {
     categories = new Set();
     return;
   }
-
   try {
     const res = await fetch(M3U_URL, { timeout: 15000 });
     const text = await res.text();
@@ -55,6 +53,8 @@ async function fetchM3UEnv() {
     console.log(`✅ (env) Loaded ${channels.length} channels from M3U_URL`);
   } catch (err) {
     console.error('❌ (env) Failed to fetch M3U:', err.message);
+    channels = [];
+    categories = new Set();
   }
 }
 
@@ -64,7 +64,6 @@ async function fetchEPGEnv() {
     epgData = {};
     return;
   }
-
   try {
     const res = await fetch(EPG_URL, { timeout: 15000 });
     const xml = await res.text();
@@ -90,7 +89,6 @@ async function fetchEPGEnv() {
   }
 }
 
-// Keep your existing getNowNext logic — used both for env addon and dynamic ones
 function getNowNextFromEPG(epgObj, channelId) {
   const now = dayjs();
   const programs = epgObj[channelId] || [];
@@ -98,14 +96,8 @@ function getNowNextFromEPG(epgObj, channelId) {
   let nextProgram = null;
 
   for (let i = 0; i < programs.length; i++) {
-    // XMLTV time format common representation: "20250101000000 +0000" or similar
-    // Try flexible parsing; fall back if not parseable
-    const startRaw = programs[i].start;
-    const stopRaw = programs[i].stop;
-    // try multiple known formats, but most EPGs produced by xml2js are like "20250101000000 +0000"
-    const start = dayjs(startRaw, 'YYYYMMDDHHmmss ZZ');
-    const end = dayjs(stopRaw, 'YYYYMMDDHHmmss ZZ');
-
+    const start = dayjs(programs[i].start, 'YYYYMMDDHHmmss ZZ');
+    const end = dayjs(programs[i].stop, 'YYYYMMDDHHmmss ZZ');
     if (now.isAfter(start) && now.isBefore(end)) {
       nowProgram = programs[i];
       nextProgram = programs[i + 1] || null;
@@ -116,15 +108,12 @@ function getNowNextFromEPG(epgObj, channelId) {
   return { now: nowProgram, next: nextProgram };
 }
 
-// Unsplash/Source fallback background generator (stable but simple)
 function getUnsplashImage(category) {
   const q = encodeURIComponent((category || 'tv').replace(/\s+/g, '+'));
-  // Using source.unsplash for simplicity; you can swap to a local fallback if desired.
   return `https://source.unsplash.com/1600x900/?${q}`;
 }
 
-// ------------------ ORIGINAL STATIC ADDON (keeps previous functionality) ------------------
-
+// -------------------- Original manifest + builder (unchanged behaviour) --------------------
 const manifest = {
   id: 'community.shannyiptv',
   version: '1.0.0',
@@ -146,7 +135,7 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// Catalog handler — uses preloaded env channels
+// catalog (env)
 builder.defineCatalogHandler(({ extra }) => {
   const genre = extra?.genre;
   const filtered =
@@ -166,10 +155,10 @@ builder.defineCatalogHandler(({ extra }) => {
   });
 });
 
+// meta (env)
 builder.defineMetaHandler(({ id }) => {
   const ch = channels.find((c) => c.id === id);
   if (!ch) return Promise.resolve({ meta: {} });
-
   const epg = getNowNextFromEPG(epgData, ch.tvgId);
   return Promise.resolve({
     meta: {
@@ -184,10 +173,10 @@ builder.defineMetaHandler(({ id }) => {
   });
 });
 
+// stream (env)
 builder.defineStreamHandler(({ id }) => {
   const ch = channels.find((c) => c.id === id);
   if (!ch) return Promise.resolve({ streams: [] });
-
   return Promise.resolve({
     streams: [
       {
@@ -199,13 +188,12 @@ builder.defineStreamHandler(({ id }) => {
   });
 });
 
-// ------------------ EXPRESS APP: UI + Dynamic Manifests for multi-install ------------------
-
+// -------------------- Express app --------------------
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve Tailwind-based UI (inline HTML with CDN Tailwind)
+// Serve UI (Tailwind) at root
 app.get('/', (req, res) => {
   const html = `
   <!doctype html>
@@ -259,9 +247,7 @@ app.get('/', (req, res) => {
       </div>
 
       <script>
-      async function openInstall(url) {
-        window.open(url, '_blank');
-      }
+      async function openInstall(url) { window.open(url, '_blank'); }
 
       document.getElementById('generateM3U').addEventListener('click', () => {
         const m3u = document.getElementById('m3uUrl').value.trim();
@@ -270,9 +256,8 @@ app.get('/', (req, res) => {
         const params = new URLSearchParams();
         params.set('m3uUrl', m3u);
         if (epg) params.set('epgUrl', epg);
-        const url = '/m3u/manifest.json?' + params.toString();
-        // open page that shows install link
-        window.open('/generate-install?' + params.toString(), '_blank');
+        window.open('/addon/m3u/manifest.json?' + params.toString(), '_blank');
+        window.open('/addon/generate-install?' + params.toString(), '_blank');
       });
 
       document.getElementById('generateXC').addEventListener('click', () => {
@@ -284,7 +269,8 @@ app.get('/', (req, res) => {
         params.set('host', host);
         params.set('user', user);
         params.set('pass', pass);
-        window.open('/xc/manifest.json?' + params.toString(), '_blank');
+        window.open('/addon/xc/manifest.json?' + params.toString(), '_blank');
+        window.open('/addon/generate-install?' + params.toString(), '_blank');
       });
 
       document.getElementById('testM3U').addEventListener('click', async () => {
@@ -293,7 +279,7 @@ app.get('/', (req, res) => {
         if (!m3u) return alert('Enter M3U URL');
         resText.textContent = 'Testing...';
         try {
-          const r = await fetch('/m3u/catalog.json?m3uUrl=' + encodeURIComponent(m3u));
+          const r = await fetch('/addon/m3u/catalog.json?m3uUrl=' + encodeURIComponent(m3u));
           const j = await r.json();
           resText.textContent = 'Found ' + (j.metas?.length || 0) + ' channels';
         } catch (e) {
@@ -309,7 +295,7 @@ app.get('/', (req, res) => {
         if (!host || !user || !pass) return alert('Enter XC host, user and pass');
         resText.textContent = 'Testing...';
         try {
-          const r = await fetch('/xc/catalog.json?host=' + encodeURIComponent(host) + '&user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass));
+          const r = await fetch('/addon/xc/catalog.json?host=' + encodeURIComponent(host) + '&user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass));
           const j = await r.json();
           resText.textContent = 'Found ' + (j.metas?.length || 0) + ' channels';
         } catch (e) {
@@ -324,7 +310,7 @@ app.get('/', (req, res) => {
   res.send(html);
 });
 
-// Helper: read params safely
+// -------------------- Utility functions used by dynamic endpoints --------------------
 function readParams(req) {
   return {
     m3uUrl: req.query.m3uUrl || req.query.url || null,
@@ -335,15 +321,13 @@ function readParams(req) {
   };
 }
 
-// Generic M3U loader (used by dynamic endpoints)
-// Returns items: [{ id, name, url, logo, category, tvgId }]
 async function loadM3UFromUrl(m3uUrl) {
   if (!m3uUrl) throw new Error('No m3uUrl');
-  const res = await fetch(m3uUrl, { timeout: 20000 });
-  if (!res.ok) throw new Error('Failed to fetch M3U');
-  const text = await res.text();
+  const r = await fetch(m3uUrl, { timeout: 20000 });
+  if (!r.ok) throw new Error('Failed to fetch M3U');
+  const text = await r.text();
   const parsed = parser.parse(text);
-  const items = parsed.items.map((item, idx) => ({
+  return parsed.items.map((item, idx) => ({
     id: `dyn-${idx}-${encodeURIComponent(item.url)}`,
     name: item.name,
     url: item.url,
@@ -351,43 +335,37 @@ async function loadM3UFromUrl(m3uUrl) {
     category: item.group?.title || 'Uncategorized',
     tvgId: item.tvg?.id || item.tvg?.name || item.name,
   }));
-  return items;
 }
 
-// XC loader: try to fetch XC as M3U (common XC endpoints support type=m3u_plus)
 async function loadXCAsM3U({ host, user, pass }) {
   if (!host || !user || !pass) throw new Error('Missing XC credentials');
-  // Try common XC get.php m3u endpoint
-  const url = `http://${host}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_live_streams`;
-  // First try JSON streams (player_api), but also attempt m3u endpoint
+  // Try player_api first
   try {
-    const r = await fetch(url, { timeout: 15000 });
+    const api = `http://${host}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_live_streams`;
+    const r = await fetch(api, { timeout: 15000 });
     if (r.ok) {
       const json = await r.json();
-      // Convert JSON items -> items similar shape to M3U parser
-      const items = json.map((it, idx) => ({
+      return json.map((it, idx) => ({
         id: `xc-${idx}-${it.stream_id}`,
         name: it.name,
-        // common XC stream access pattern (this may require tuning per-host; see notes below)
         url: `http://${host}/live/${user}/${pass}/${it.stream_id}.m3u8`,
         logo: it.stream_icon || null,
         category: it.category_name || 'Live',
-        tvgId: it.stream_id + '',
+        tvgId: String(it.stream_id),
       }));
-      return items;
     }
   } catch (e) {
-    // fallback to attempt m3u_plus style
+    // continue to fallback
   }
 
-  // fallback: try get.php m3u
+  // Fallback to get.php m3u_plus
   try {
     const m3uTry = `http://${host}/get.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&type=m3u_plus`;
     const r2 = await fetch(m3uTry, { timeout: 15000 });
     if (!r2.ok) throw new Error('XC m3u fetch failed');
     const text = await r2.text();
     const parsed = parser.parse(text);
-    const items = parsed.items.map((item, idx) => ({
+    return parsed.items.map((item, idx) => ({
       id: `xc-m3u-${idx}-${encodeURIComponent(item.url)}`,
       name: item.name,
       url: item.url,
@@ -395,13 +373,11 @@ async function loadXCAsM3U({ host, user, pass }) {
       category: item.group?.title || 'Live',
       tvgId: item.tvg?.id || item.name,
     }));
-    return items;
   } catch (err) {
     throw new Error('XC fetch failed: ' + err.message);
   }
 }
 
-// Helper: fetch EPG (XMLTV) from URL and build epg map
 async function fetchEPGFromUrl(epgUrl) {
   if (!epgUrl) return {};
   try {
@@ -428,10 +404,10 @@ async function fetchEPGFromUrl(epgUrl) {
   }
 }
 
-// ---------------- Dynamic M3U manifest + resources ----------------
+// -------------------- Dynamic endpoints mounted under /addon --------------------
 
-// Manifest so Stremio can add as a separate addon per m3uUrl
-app.get('/m3u/manifest.json', (req, res) => {
+// M3U dynamic manifest
+app.get('/addon/m3u/manifest.json', (req, res) => {
   const params = readParams(req);
   const idSuffix = params.m3uUrl ? encodeURIComponent(params.m3uUrl).slice(0, 40) : Date.now();
   const man = {
@@ -446,35 +422,31 @@ app.get('/m3u/manifest.json', (req, res) => {
   res.json(man);
 });
 
-// Catalog for dynamic m3u
-app.get('/m3u/catalog.json', async (req, res) => {
+app.get('/addon/m3u/catalog.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    // optionally fetch epg for now/next
     const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
     const metas = items.map((ch) => {
       const epg = getNowNextFromEPG(epgMap, ch.tvgId);
-      const descNowNext = `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`;
       return {
         id: encodeURIComponent(ch.id),
         name: ch.name,
         type: 'tv',
         poster: ch.logo,
         background: getUnsplashImage(ch.category),
-        description: descNowNext,
+        description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
         genres: [ch.category || 'Live'],
       };
     });
     res.json({ metas });
   } catch (err) {
-    console.error('/m3u/catalog error', err.message);
+    console.error('/addon/m3u/catalog error', err.message);
     res.json({ metas: [] });
   }
 });
 
-// Meta for dynamic m3u
-app.get('/m3u/meta/:id.json', async (req, res) => {
+app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
   try {
@@ -494,13 +466,12 @@ app.get('/m3u/meta/:id.json', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('/m3u/meta error', err.message);
+    console.error('/addon/m3u/meta error', err.message);
     res.json({ meta: {} });
   }
 });
 
-// Stream for dynamic m3u
-app.get('/m3u/stream/:id.json', async (req, res) => {
+app.get('/addon/m3u/stream/:id.json', async (req, res) => {
   const { m3uUrl } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
   try {
@@ -509,14 +480,13 @@ app.get('/m3u/stream/:id.json', async (req, res) => {
     if (!ch) return res.json({ streams: [] });
     return res.json({ streams: [{ url: ch.url, title: ch.name, externalUrl: true }] });
   } catch (err) {
-    console.error('/m3u/stream error', err.message);
+    console.error('/addon/m3u/stream error', err.message);
     res.json({ streams: [] });
   }
 });
 
-// ---------------- Dynamic XC manifest + resources ----------------
-
-app.get('/xc/manifest.json', (req, res) => {
+// XC dynamic manifest
+app.get('/addon/xc/manifest.json', (req, res) => {
   const params = readParams(req);
   const idSuffix = params.host ? encodeURIComponent(params.host).slice(0, 40) : Date.now();
   const man = {
@@ -531,11 +501,10 @@ app.get('/xc/manifest.json', (req, res) => {
   res.json(man);
 });
 
-app.get('/xc/catalog.json', async (req, res) => {
+app.get('/addon/xc/catalog.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    // no epg by default for XC here; could try to fetch if provider exposes it
     const metas = items.map((ch) => ({
       id: encodeURIComponent(ch.id),
       name: ch.name,
@@ -547,19 +516,18 @@ app.get('/xc/catalog.json', async (req, res) => {
     }));
     res.json({ metas });
   } catch (err) {
-    console.error('/xc/catalog error', err.message);
+    console.error('/addon/xc/catalog error', err.message);
     res.json({ metas: [] });
   }
 });
 
-app.get('/xc/meta/:id.json', async (req, res) => {
+app.get('/addon/xc/meta/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
   try {
     const items = await loadXCAsM3U({ host, user, pass });
     const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
     if (!ch) return res.json({ meta: {} });
-    // no EPG by default; show placeholder
     return res.json({
       meta: {
         id: ch.id,
@@ -571,40 +539,35 @@ app.get('/xc/meta/:id.json', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('/xc/meta error', err.message);
+    console.error('/addon/xc/meta error', err.message);
     res.json({ meta: {} });
   }
 });
 
-app.get('/xc/stream/:id.json', async (req, res) => {
+app.get('/addon/xc/stream/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
   try {
     const items = await loadXCAsM3U({ host, user, pass });
     const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
     if (!ch) return res.json({ streams: [] });
-
-    // If we created a stream URL already in loadXCAsM3U, return it.
-    // If not, attempt a common XC pattern:
     const streamUrl = ch.url || `http://${host}/live/${user}/${pass}/${ch.tvgId}.m3u8`;
     return res.json({ streams: [{ url: streamUrl, title: ch.name, externalUrl: true }] });
   } catch (err) {
-    console.error('/xc/stream error', err.message);
+    console.error('/addon/xc/stream error', err.message);
     res.json({ streams: [] });
   }
 });
 
-// ---------------- One-click install generator ----------------
-// This returns a small HTML page containing the unique manifest URL which users can paste into Stremio
-app.get('/generate-install', (req, res) => {
+// One-click install generator (returns manifest link HTML)
+app.get('/addon/generate-install', (req, res) => {
   const raw = req.url.split('?')[1] || '';
-  // Find whether it's m3u or xc param set
   const params = new URLSearchParams(raw);
   let manifestUrl;
   if (params.has('m3uUrl') || params.has('epgUrl')) {
-    manifestUrl = `${req.protocol}://${req.get('host')}/m3u/manifest.json?${raw}`;
+    manifestUrl = `${req.protocol}://${req.get('host')}/addon/m3u/manifest.json?${raw}`;
   } else if (params.has('host') && params.has('user') && params.has('pass')) {
-    manifestUrl = `${req.protocol}://${req.get('host')}/xc/manifest.json?${raw}`;
+    manifestUrl = `${req.protocol}://${req.get('host')}/addon/xc/manifest.json?${raw}`;
   } else {
     return res.status(400).send('Invalid generate-install parameters');
   }
@@ -621,39 +584,42 @@ app.get('/generate-install', (req, res) => {
   res.send(html);
 });
 
-// ---------------- Static files route (optional): for local background fallback) ----------------
-app.use('/static', express.static(path.join(__dirname, 'public')));
+// Serve static /public if you want to add local backgrounds later
+app.use('/public', express.static(path.join(__dirname, 'public')));
 
-// ---------------- START SERVER ----------------
+// -------------------- Mount Stremio builder interface safely --------------------
+try {
+  const stremioInterface = builder.getInterface();
+  if (typeof stremioInterface === 'function') {
+    app.use('/stremio', stremioInterface); // mount original addon interface
+    console.log('✅ Mounted stremio interface at /stremio');
+  } else {
+    console.warn('⚠️ builder.getInterface() did not return a function; skipping mount. Original manifest will still be available at /manifest.json');
+  }
+} catch (e) {
+  console.warn('⚠️ Could not mount stremio interface:', e.message);
+}
 
+// Expose the original manifest.json for backwards compatibility (env-mode)
+app.get('/manifest.json', (req, res) => res.json(manifest));
+
+// -------------------- Start server --------------------
 (async () => {
-  // preload env data for original addon
   await fetchM3UEnv();
   await fetchEPGEnv();
 
-  // if categories loaded, update manifest extras (so original addon keeps same behaviour)
   if (categories.size > 0) {
     manifest.catalogs[0].extra[0].options = ['All', ...Array.from(categories).sort()];
     console.log('✅ Manifest categories updated (env):', manifest.catalogs[0].extra[0].options);
+  } else {
+    console.log('⚠️ No categories loaded from env M3U_URL');
   }
 
-  // Integrate stremio addon interface into express app
-  // builder.getInterface() returns a function suitable to mount; serve it at '/addon' and root manifest at '/manifest.json'
-  const stremioInterface = builder.getInterface();
-  // mount the stremio interface at /stremio (so the original manifest remains at /manifest.json)
-  app.use('/stremio', stremioInterface);
-
-  // Also expose the original manifest at root /manifest.json for backwards compatibility
-  app.get('/manifest.json', (req, res) => {
-    res.json(manifest);
-  });
-
-  // Mount express app on port
   app.listen(PORT, () => {
-    console.log(`🚀 HTTP server listening on http://0.0.0.0:${PORT}`);
+    console.log(`🚀 Server listening on http://0.0.0.0:${PORT}`);
     console.log(` - UI: http://0.0.0.0:${PORT}/`);
     console.log(` - Original manifest: http://0.0.0.0:${PORT}/manifest.json`);
-    console.log(` - Dynamic M3U manifest example: http://0.0.0.0:${PORT}/m3u/manifest.json?m3uUrl=<ENCODED_URL>`);
-    console.log(` - Dynamic XC manifest example: http://0.0.0.0:${PORT}/xc/manifest.json?host=<HOST>&user=<USER>&pass=<PASS>`);
+    console.log(` - Dynamic M3U example: http://0.0.0.0:${PORT}/addon/m3u/manifest.json?m3uUrl=<ENCODED_URL>`);
+    console.log(` - Dynamic XC example: http://0.0.0.0:${PORT}/addon/xc/manifest.json?host=<HOST>&user=<USER>&pass=<PASS>`);
   });
 })();
