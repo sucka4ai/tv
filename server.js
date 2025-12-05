@@ -1,181 +1,191 @@
-const express = require("express");
-const cors = require("cors");
+const { serveHTTP, addonBuilder } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
-const iptvParser = require("iptv-playlist-parser");
+const parser = require("iptv-playlist-parser");
 const xml2js = require("xml2js");
 const dayjs = require("dayjs");
-const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
-const M3U_URL = process.env.M3U_URL || null;
-const EPG_URL = process.env.EPG_URL || null;
+const M3U_URL = process.env.M3U_URL;
+const EPG_URL = process.env.EPG_URL;
 
-// ❗ DO NOT EXIT — allow addon to run even with missing URLs
-if (!M3U_URL) console.warn("⚠️ WARNING: M3U_URL is NOT set. No live channels will load.");
-if (!EPG_URL) console.warn("⚠️ WARNING: EPG_URL is NOT set. No EPG data will load.");
+let channels = [];
+let epgData = {};
+let categories = new Set();
+
+// ---------------- FETCH FUNCTIONS ----------------
+
+async function fetchM3U() {
+    try {
+        const res = await fetch(M3U_URL, { timeout: 15000 });
+        const text = await res.text();
+        const parsed = parser.parse(text);
+
+        categories = new Set();
+        channels = parsed.items.map((item, index) => {
+            const category = item.group?.title || "Uncategorized";
+            categories.add(category);
+            return {
+                id: `channel-${index}`,
+                name: item.name,
+                url: item.url,
+                logo: item.tvg.logo,
+                category,
+                tvgId: item.tvg.id,
+            };
+        });
+
+        console.log(`✅ Loaded ${channels.length} channels`);
+    } catch (err) {
+        console.error("❌ Failed to fetch M3U:", err.message);
+    }
+}
+
+async function fetchEPG() {
+    try {
+        const res = await fetch(EPG_URL, { timeout: 15000 });
+        const xml = await res.text();
+        const result = await xml2js.parseStringPromise(xml);
+
+        const programs = result.tv.programme || [];
+        epgData = {};
+        for (const program of programs) {
+            const channelId = program.$.channel;
+            if (!epgData[channelId]) epgData[channelId] = [];
+            epgData[channelId].push({
+                start: program.$.start,
+                stop: program.$.stop,
+                title: program.title?.[0]?._ || "No Title",
+                desc: program.desc?.[0]?._ || "",
+            });
+        }
+
+        console.log(`✅ Loaded EPG with ${programs.length} programmes`);
+    } catch (err) {
+        console.error("❌ Failed to fetch EPG:", err.message);
+    }
+}
+
+function getNowNext(channelId) {
+    const now = dayjs();
+    const programs = epgData[channelId] || [];
+    let nowProgram = null;
+    let nextProgram = null;
+
+    for (let i = 0; i < programs.length; i++) {
+        const start = dayjs(programs[i].start, "YYYYMMDDHHmmss ZZ");
+        const end = dayjs(programs[i].stop, "YYYYMMDDHHmmss ZZ");
+        if (now.isAfter(start) && now.isBefore(end)) {
+            nowProgram = programs[i];
+            nextProgram = programs[i + 1] || null;
+            break;
+        }
+    }
+
+    return { now: nowProgram, next: nextProgram };
+}
+
+function getUnsplashImage(category) {
+    const encoded = encodeURIComponent(category || "tv");
+    return `https://source.unsplash.com/1600x900/?${encoded}`;
+}
+
+// ---------------- MANIFEST ----------------
 
 const manifest = {
-  id: "org.example.iptv",
-  version: "1.0.0",
-  name: "Custom IPTV Addon",
-  description: "IPTV addon with M3U and EPG support",
-  resources: ["catalog", "stream", "meta"],
-  types: ["tv"],
-  idPrefixes: ["iptv"],
-  catalogs: [
-    {
-      id: "iptv-catalog",
-      name: "All IPTV Channels",
-      type: "tv"
-    }
-  ]
+    id: "community.shannyiptv",
+    version: "1.0.0",
+    name: "Shanny IPTV",
+    description: "IPTV with category filtering and EPG",
+    logo: "https://upload.wikimedia.org/wikipedia/commons/9/99/TV_icon_2.svg",
+    resources: ["catalog", "stream", "meta"],
+    types: ["tv"],
+    catalogs: [
+        {
+            type: "tv",
+            id: "shannyiptv",
+            name: "Shanny IPTV",
+            extra: [{ name: "genre", options: ["All"] }], // updated after M3U load
+        },
+    ],
+    idPrefixes: ["channel-"],
 };
 
 const builder = new addonBuilder(manifest);
 
-let channels = [];
-let epgData = {};
+// ---------------- HANDLERS ----------------
 
-async function loadChannels() {
-  if (!M3U_URL) {
-    console.warn("⚠️ Skipping channel load — M3U_URL not provided.");
-    channels = [];
-    return;
-  }
+builder.defineCatalogHandler(({ extra }) => {
+    const genre = extra?.genre;
+    const filtered =
+        genre && genre !== "All"
+            ? channels.filter((ch) => ch.category === genre)
+            : channels;
 
-  try {
-    const res = await fetch(M3U_URL);
-    const text = await res.text();
-    channels = iptvParser.parse(text).items || [];
-    console.log(`✅ Loaded ${channels.length} channels`);
-  } catch (e) {
-    console.error("❌ Failed to load or parse M3U:", e.message);
-    channels = [];
-  }
-}
+    return Promise.resolve({
+        metas: filtered.map((ch) => ({
+            id: ch.id,
+            type: "tv",
+            name: ch.name,
+            poster: ch.logo,
+            background: getUnsplashImage(ch.category),
+            description: `Live stream for ${ch.name}`,
+        })),
+    });
+});
 
-async function loadEPG() {
-  if (!EPG_URL) {
-    console.warn("⚠️ Skipping EPG load — EPG_URL not provided.");
-    epgData = {};
-    return;
-  }
+builder.defineMetaHandler(({ id }) => {
+    const ch = channels.find((c) => c.id === id);
+    if (!ch) return Promise.resolve({ meta: {} });
 
-  try {
-    const res = await fetch(EPG_URL);
-    const text = await res.text();
-    const result = await xml2js.parseStringPromise(text);
-    epgData = result || {};
-    console.log("✅ EPG loaded");
-  } catch (e) {
-    console.error("❌ Failed to load or parse EPG XML:", e.message);
-    epgData = {};
-  }
-}
+    const epg = getNowNext(ch.tvgId);
+    return Promise.resolve({
+        meta: {
+            id: ch.id,
+            type: "tv",
+            name: ch.name,
+            logo: ch.logo,
+            poster: ch.logo,
+            background: getUnsplashImage(ch.category),
+            description: `${epg.now?.title || "No EPG"} — ${
+                epg.next?.title || "No info"
+            }`,
+        },
+    });
+});
 
-function findChannelEPG(channelId) {
-  if (!epgData.tv || !epgData.tv.channel) return null;
-  return epgData.tv.channel.find(c => c.$.id === channelId);
-}
+builder.defineStreamHandler(({ id }) => {
+    const ch = channels.find((c) => c.id === id);
+    if (!ch) return Promise.resolve({ streams: [] });
 
-function findProgramsForChannel(channelId) {
-  if (!epgData.tv || !epgData.tv.programme) return [];
-  return epgData.tv.programme.filter(p => p.$.channel === channelId);
-}
+    return Promise.resolve({
+        streams: [
+            {
+                url: ch.url,
+                title: ch.name,
+                externalUrl: true,
+            },
+        ],
+    });
+});
 
-// Load data on start
+// ---------------- STARTUP ----------------
+
 (async () => {
-  await loadChannels();
-  await loadEPG();
+    // Preload data before serving manifest
+    await fetchM3U();
+    await fetchEPG();
+
+    // Update manifest with categories if available
+    if (categories.size > 0) {
+        manifest.catalogs[0].extra[0].options = [
+            "All",
+            ...Array.from(categories).sort(),
+        ];
+        console.log("✅ Manifest categories updated:", manifest.catalogs[0].extra[0].options);
+    } else {
+        console.log("⚠️ No categories loaded, using default 'All' only");
+    }
+
+    const port = process.env.PORT || 7000;
+    serveHTTP(builder.getInterface(), { port });
+    console.log(`🚀 Shanny IPTV Addon running on port ${port}`);
 })();
-
-// Refresh data every 10 minutes
-setInterval(async () => {
-  await loadChannels();
-  await loadEPG();
-}, 10 * 60 * 1000);
-
-// ----------------------
-// CATALOG HANDLER
-// ----------------------
-builder.defineCatalogHandler(async () => {
-
-  // If no M3U_URL set → return empty safe catalog
-  if (!channels.length) {
-    return { metas: [] };
-  }
-
-  return {
-    metas: channels.map(channel => ({
-      id: `iptv:${channel.tvgId || channel.name}`,
-      type: "tv",
-      name: channel.name,
-      poster: channel.tvgLogo || undefined,
-      posterShape: "default",
-      description: channel.name,
-    })),
-  };
-});
-
-// ----------------------
-// META HANDLER
-// ----------------------
-builder.defineMetaHandler(async ({ id }) => {
-
-  if (!id.startsWith("iptv:")) return null;
-
-  const channelId = id.replace("iptv:", "");
-  const channel = channels.find(c => (c.tvgId || c.name) === channelId);
-
-  if (!channel) {
-    return { meta: { id, type: "tv", name: "Unknown Channel" } };
-  }
-
-  const epgChannel = findChannelEPG(channel.tvgId || channel.name);
-
-  return {
-    meta: {
-      id,
-      type: "tv",
-      name: channel.name,
-      description: channel.name,
-      poster: channel.tvgLogo,
-      releaseInfo: epgChannel ? epgChannel["display-name"]?.[0] : undefined,
-    },
-  };
-});
-
-// ----------------------
-// STREAM HANDLER
-// ----------------------
-builder.defineStreamHandler(async ({ id }) => {
-
-  if (!id.startsWith("iptv:")) return { streams: [] };
-
-  const channelId = id.replace("iptv:", "");
-  const channel = channels.find(c => (c.tvgId || c.name) === channelId);
-
-  if (!channel) return { streams: [] };
-
-  return {
-    streams: [
-      {
-        title: channel.name,
-        url: channel.url,
-        description: channel.name,
-        subtitles: [],
-        isFree: true,
-      },
-    ],
-  };
-});
-
-const addonInterface = builder.getInterface();
-
-// ----------------------
-// RUN SERVER SAFELY
-// ----------------------
-serveHTTP(addonInterface, {
-  port: process.env.PORT || 7000,
-});
-
-console.log(`🚀 IPTV Addon running on port ${process.env.PORT || 7000}`);
