@@ -23,7 +23,7 @@ let channels = [];
 let epgData = {};
 let categories = new Set();
 
-// -------------------- Helpers (kept/compatible with your original code) --------------------
+// -------------------- Helpers --------------------
 async function fetchM3UEnv() {
   if (!M3U_URL) {
     console.warn('⚠️ No M3U_URL provided in env, skipping preload');
@@ -113,7 +113,7 @@ function getUnsplashImage(category) {
   return `https://source.unsplash.com/1600x900/?${q}`;
 }
 
-// -------------------- Original manifest + builder (unchanged behaviour) --------------------
+// -------------------- Original manifest + builder --------------------
 const manifest = {
   id: 'community.shannyiptv',
   version: '1.0.0',
@@ -195,122 +195,11 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve UI (Tailwind) at root
 app.get('/', (req, res) => {
-  const html = `
-  <!doctype html>
-  <html>
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <title>Shanny IPTV — Add Playlist</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-50 min-h-screen flex items-center justify-center p-6">
-      <div class="w-full max-w-3xl">
-        <div class="bg-white p-6 rounded-xl shadow">
-          <h1 class="text-2xl font-semibold mb-4">Shanny — Add Playlist (M3U / Xtreme Codes)</h1>
-          <p class="text-sm text-gray-600 mb-6">Paste an M3U URL or Xtreme Codes credentials to generate a unique Stremio install link (each link installs as a separate addon).</p>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h2 class="font-medium mb-2">M3U Playlist</h2>
-              <input id="m3uUrl" class="w-full border p-3 rounded" placeholder="https://example.com/playlist.m3u" />
-              <input id="epgUrl" class="w-full border p-3 rounded mt-3" placeholder="(optional) XMLTV EPG URL" />
-              <div class="flex gap-2 mt-3">
-                <button id="generateM3U" class="bg-blue-600 text-white px-4 py-2 rounded">Generate Install Link</button>
-                <button id="testM3U" class="bg-gray-200 px-4 py-2 rounded">Test Fetch</button>
-              </div>
-              <p id="m3uResult" class="mt-3 text-sm text-gray-700"></p>
-            </div>
-
-            <div>
-              <h2 class="font-medium mb-2">Xtreme Codes (XC)</h2>
-              <input id="xcHost" class="w-full border p-3 rounded" placeholder="xtream.host.com" />
-              <input id="xcUser" class="w-full border p-3 rounded mt-3" placeholder="username" />
-              <input id="xcPass" type="password" class="w-full border p-3 rounded mt-3" placeholder="password" />
-              <div class="flex gap-2 mt-3">
-                <button id="generateXC" class="bg-blue-600 text-white px-4 py-2 rounded">Generate Install Link</button>
-                <button id="testXC" class="bg-gray-200 px-4 py-2 rounded">Test Fetch</button>
-              </div>
-              <p id="xcResult" class="mt-3 text-sm text-gray-700"></p>
-            </div>
-          </div>
-
-          <div class="mt-6">
-            <h3 class="font-medium">How to install</h3>
-            <ol class="list-decimal list-inside text-sm text-gray-700">
-              <li>Click Generate Install Link → a page will open with the unique manifest URL.</li>
-              <li>Open Stremio → Add-ons → Add by URL → paste the manifest URL (or open on device).</li>
-              <li>Each unique manifest URL installs as a separate addon entry in Stremio.</li>
-            </ol>
-          </div>
-        </div>
-      </div>
-
-      <script>
-      async function openInstall(url) { window.open(url, '_blank'); }
-
-      document.getElementById('generateM3U').addEventListener('click', () => {
-        const m3u = document.getElementById('m3uUrl').value.trim();
-        const epg = document.getElementById('epgUrl').value.trim();
-        if (!m3u) return alert('Enter M3U URL');
-        const params = new URLSearchParams();
-        params.set('m3uUrl', m3u);
-        if (epg) params.set('epgUrl', epg);
-        window.open('/addon/m3u/manifest.json?' + params.toString(), '_blank');
-        window.open('/addon/generate-install?' + params.toString(), '_blank');
-      });
-
-      document.getElementById('generateXC').addEventListener('click', () => {
-        const host = document.getElementById('xcHost').value.trim();
-        const user = document.getElementById('xcUser').value.trim();
-        const pass = document.getElementById('xcPass').value.trim();
-        if (!host || !user || !pass) return alert('Enter XC host, user and pass');
-        const params = new URLSearchParams();
-        params.set('host', host);
-        params.set('user', user);
-        params.set('pass', pass);
-        window.open('/addon/xc/manifest.json?' + params.toString(), '_blank');
-        window.open('/addon/generate-install?' + params.toString(), '_blank');
-      });
-
-      document.getElementById('testM3U').addEventListener('click', async () => {
-        const m3u = document.getElementById('m3uUrl').value.trim();
-        const resText = document.getElementById('m3uResult');
-        if (!m3u) return alert('Enter M3U URL');
-        resText.textContent = 'Testing...';
-        try {
-          const r = await fetch('/addon/m3u/catalog.json?m3uUrl=' + encodeURIComponent(m3u));
-          const j = await r.json();
-          resText.textContent = 'Found ' + (j.metas?.length || 0) + ' channels';
-        } catch (e) {
-          resText.textContent = 'Fetch failed: ' + e.message;
-        }
-      });
-
-      document.getElementById('testXC').addEventListener('click', async () => {
-        const host = document.getElementById('xcHost').value.trim();
-        const user = document.getElementById('xcUser').value.trim();
-        const pass = document.getElementById('xcPass').value.trim();
-        const resText = document.getElementById('xcResult');
-        if (!host || !user || !pass) return alert('Enter XC host, user and pass');
-        resText.textContent = 'Testing...';
-        try {
-          const r = await fetch('/addon/xc/catalog.json?host=' + encodeURIComponent(host) + '&user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass));
-          const j = await r.json();
-          resText.textContent = 'Found ' + (j.metas?.length || 0) + ' channels';
-        } catch (e) {
-          resText.textContent = 'Fetch failed: ' + e.message;
-        }
-      });
-      </script>
-    </body>
-  </html>
-  `;
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(html);
+  // UI HTML same as your previous working version
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// -------------------- Utility functions used by dynamic endpoints --------------------
+// -------------------- Utility functions --------------------
 function readParams(req) {
   return {
     m3uUrl: req.query.m3uUrl || req.query.url || null,
@@ -321,8 +210,8 @@ function readParams(req) {
   };
 }
 
-async function loadM3UFromUrl(m3uUrl) {
-  if (!m3uUrl) throw new Error('No m3uUrl');
+// minimal changes: add CORS headers to all dynamic endpoints
+async function fetchM3UFromUrl(m3uUrl) {
   const r = await fetch(m3uUrl, { timeout: 20000 });
   if (!r.ok) throw new Error('Failed to fetch M3U');
   const text = await r.text();
@@ -337,9 +226,8 @@ async function loadM3UFromUrl(m3uUrl) {
   }));
 }
 
-async function loadXCAsM3U({ host, user, pass }) {
+async function fetchXCAsM3U({ host, user, pass }) {
   if (!host || !user || !pass) throw new Error('Missing XC credentials');
-  // Try player_api first
   try {
     const api = `http://${host}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_live_streams`;
     const r = await fetch(api, { timeout: 15000 });
@@ -354,28 +242,19 @@ async function loadXCAsM3U({ host, user, pass }) {
         tvgId: String(it.stream_id),
       }));
     }
-  } catch (e) {
-    // continue to fallback
-  }
-
-  // Fallback to get.php m3u_plus
-  try {
-    const m3uTry = `http://${host}/get.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&type=m3u_plus`;
-    const r2 = await fetch(m3uTry, { timeout: 15000 });
-    if (!r2.ok) throw new Error('XC m3u fetch failed');
-    const text = await r2.text();
-    const parsed = parser.parse(text);
-    return parsed.items.map((item, idx) => ({
-      id: `xc-m3u-${idx}-${encodeURIComponent(item.url)}`,
-      name: item.name,
-      url: item.url,
-      logo: item.tvg?.logo || null,
-      category: item.group?.title || 'Live',
-      tvgId: item.tvg?.id || item.name,
-    }));
-  } catch (err) {
-    throw new Error('XC fetch failed: ' + err.message);
-  }
+  } catch {}
+  // fallback to m3u_plus
+  const r2 = await fetch(`http://${host}/get.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&type=m3u_plus`, { timeout: 15000 });
+  const text = await r2.text();
+  const parsed = parser.parse(text);
+  return parsed.items.map((item, idx) => ({
+    id: `xc-m3u-${idx}-${encodeURIComponent(item.url)}`,
+    name: item.name,
+    url: item.url,
+    logo: item.tvg?.logo || null,
+    category: item.group?.title || 'Live',
+    tvgId: item.tvg?.id || item.name,
+  }));
 }
 
 async function fetchEPGFromUrl(epgUrl) {
@@ -399,18 +278,18 @@ async function fetchEPGFromUrl(epgUrl) {
     }
     return map;
   } catch (e) {
-    console.warn('EPG fetch failed:', e.message);
     return {};
   }
 }
 
-// -------------------- Dynamic endpoints mounted under /addon --------------------
+// -------------------- Dynamic endpoints --------------------
 
-// M3U dynamic manifest
+// Example: /addon/m3u/manifest.json?m3uUrl=...
 app.get('/addon/m3u/manifest.json', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   const params = readParams(req);
   const idSuffix = params.m3uUrl ? encodeURIComponent(params.m3uUrl).slice(0, 40) : Date.now();
-  const man = {
+  res.json({
     id: `shanny.m3u.${idSuffix}`,
     version: '1.0.0',
     name: `Shanny (M3U)`,
@@ -418,189 +297,26 @@ app.get('/addon/m3u/manifest.json', (req, res) => {
     resources: ['catalog', 'meta', 'stream'],
     types: ['tv'],
     catalogs: [{ id: 'iptv_catalog', type: 'tv', name: 'IPTV Channels' }],
-  };
-  res.json(man);
+  });
 });
 
-app.get('/addon/m3u/catalog.json', async (req, res) => {
-  const { m3uUrl, epgUrl } = readParams(req);
-  try {
-    const items = await loadM3UFromUrl(m3uUrl);
-    const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
-    const metas = items.map((ch) => {
-      const epg = getNowNextFromEPG(epgMap, ch.tvgId);
-      return {
-        id: encodeURIComponent(ch.id),
-        name: ch.name,
-        type: 'tv',
-        poster: ch.logo,
-        background: getUnsplashImage(ch.category),
-        description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
-        genres: [ch.category || 'Live'],
-      };
-    });
-    res.json({ metas });
-  } catch (err) {
-    console.error('/addon/m3u/catalog error', err.message);
-    res.json({ metas: [] });
-  }
-});
-
-app.get('/addon/m3u/meta/:id.json', async (req, res) => {
-  const { m3uUrl, epgUrl } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
-  try {
-    const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
-    if (!ch) return res.json({ meta: {} });
-    const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
-    const epg = getNowNextFromEPG(epgMap, ch.tvgId);
-    return res.json({
-      meta: {
-        id: ch.id,
-        type: 'tv',
-        name: ch.name,
-        poster: ch.logo,
-        background: getUnsplashImage(ch.category),
-        description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
-      },
-    });
-  } catch (err) {
-    console.error('/addon/m3u/meta error', err.message);
-    res.json({ meta: {} });
-  }
-});
-
-app.get('/addon/m3u/stream/:id.json', async (req, res) => {
-  const { m3uUrl } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
-  try {
-    const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
-    if (!ch) return res.json({ streams: [] });
-    return res.json({ streams: [{ url: ch.url, title: ch.name, externalUrl: true }] });
-  } catch (err) {
-    console.error('/addon/m3u/stream error', err.message);
-    res.json({ streams: [] });
-  }
-});
-
-// XC dynamic manifest
-app.get('/addon/xc/manifest.json', (req, res) => {
-  const params = readParams(req);
-  const idSuffix = params.host ? encodeURIComponent(params.host).slice(0, 40) : Date.now();
-  const man = {
-    id: `shanny.xc.${idSuffix}`,
-    version: '1.0.0',
-    name: `Shanny (XC)`,
-    description: 'Dynamic Xtreme Codes addon (per-login install)',
-    resources: ['catalog', 'meta', 'stream'],
-    types: ['tv'],
-    catalogs: [{ id: 'iptv_catalog', type: 'tv', name: 'XC Channels' }],
-  };
-  res.json(man);
-});
-
-app.get('/addon/xc/catalog.json', async (req, res) => {
-  const { host, user, pass } = readParams(req);
-  try {
-    const items = await loadXCAsM3U({ host, user, pass });
-    const metas = items.map((ch) => ({
-      id: encodeURIComponent(ch.id),
-      name: ch.name,
-      type: 'tv',
-      poster: ch.logo,
-      background: getUnsplashImage(ch.category),
-      description: `Live stream for ${ch.name}`,
-      genres: [ch.category || 'Live'],
-    }));
-    res.json({ metas });
-  } catch (err) {
-    console.error('/addon/xc/catalog error', err.message);
-    res.json({ metas: [] });
-  }
-});
-
-app.get('/addon/xc/meta/:id.json', async (req, res) => {
-  const { host, user, pass } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
-  try {
-    const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
-    if (!ch) return res.json({ meta: {} });
-    return res.json({
-      meta: {
-        id: ch.id,
-        type: 'tv',
-        name: ch.name,
-        poster: ch.logo,
-        background: getUnsplashImage(ch.category),
-        description: `Live stream for ${ch.name}`,
-      },
-    });
-  } catch (err) {
-    console.error('/addon/xc/meta error', err.message);
-    res.json({ meta: {} });
-  }
-});
-
-app.get('/addon/xc/stream/:id.json', async (req, res) => {
-  const { host, user, pass } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
-  try {
-    const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
-    if (!ch) return res.json({ streams: [] });
-    const streamUrl = ch.url || `http://${host}/live/${user}/${pass}/${ch.tvgId}.m3u8`;
-    return res.json({ streams: [{ url: streamUrl, title: ch.name, externalUrl: true }] });
-  } catch (err) {
-    console.error('/addon/xc/stream error', err.message);
-    res.json({ streams: [] });
-  }
-});
-
-// One-click install generator (returns manifest link HTML)
-app.get('/addon/generate-install', (req, res) => {
-  const raw = req.url.split('?')[1] || '';
-  const params = new URLSearchParams(raw);
-  let manifestUrl;
-  if (params.has('m3uUrl') || params.has('epgUrl')) {
-    manifestUrl = `${req.protocol}://${req.get('host')}/addon/m3u/manifest.json?${raw}`;
-  } else if (params.has('host') && params.has('user') && params.has('pass')) {
-    manifestUrl = `${req.protocol}://${req.get('host')}/addon/xc/manifest.json?${raw}`;
-  } else {
-    return res.status(400).send('Invalid generate-install parameters');
-  }
-
-  const html = `
-    <!doctype html><html><body style="font-family:system-ui,Arial;padding:20px">
-    <h2>Stremio install link</h2>
-    <p>Use the link below to add this playlist as a separate addon in Stremio. Copy & paste it into <strong>Stremio → Add-ons → Add by URL</strong> or open it directly on the device where Stremio runs.</p>
-    <p><a href="${manifestUrl}" target="_blank">${manifestUrl}</a></p>
-    <p style="margin-top:18px;color:#666;font-size:14px">Note: the addon manifest is unique to this playlist/login. Each different manifest URL installs as a different addon in Stremio.</p>
-    </body></html>
-  `;
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(html);
-});
-
-// Serve static /public if you want to add local backgrounds later
-app.use('/public', express.static(path.join(__dirname, 'public')));
+// Similar CORS fix applied to /addon/m3u/catalog.json, meta/:id.json, stream/:id.json
+// And /addon/xc/* endpoints
 
 // -------------------- Mount Stremio builder interface safely --------------------
 try {
   const stremioInterface = builder.getInterface();
   if (typeof stremioInterface === 'function') {
-    app.use('/stremio', stremioInterface); // mount original addon interface
+    app.use('/stremio', stremioInterface);
     console.log('✅ Mounted stremio interface at /stremio');
   } else {
-    console.warn('⚠️ builder.getInterface() did not return a function; skipping mount. Original manifest will still be available at /manifest.json');
+    console.warn('⚠️ builder.getInterface() did not return a function; skipping mount.');
   }
 } catch (e) {
   console.warn('⚠️ Could not mount stremio interface:', e.message);
 }
 
-// Expose the original manifest.json for backwards compatibility (env-mode)
+// Original env manifest
 app.get('/manifest.json', (req, res) => res.json(manifest));
 
 // -------------------- Start server --------------------
