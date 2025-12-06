@@ -440,7 +440,7 @@ app.get('/addon/m3u/manifest.json', (req, res) => {
   res.json(man);
 });
 
-app.get('/addon/m3u/catalog.json', async (req, res) => {
+app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
   try {
     const items = await loadM3UFromUrl(m3uUrl);
@@ -519,7 +519,7 @@ app.get('/addon/xc/manifest.json', (req, res) => {
   res.json(man);
 });
 
-app.get('/addon/xc/catalog.json', async (req, res) => {
+app.get('/addon/xc/catalog/:type/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
   try {
     const items = await loadXCAsM3U({ host, user, pass });
