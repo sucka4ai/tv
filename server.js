@@ -190,11 +190,16 @@ builder.defineStreamHandler(({ id }) => {
 
 // -------------------- Express app --------------------
 const app = express();
-// -------------------- Minimal CORS fix for Stremio dynamic endpoints --------------------
+// -------------------- Full CORS fix for ALL /addon/* endpoints --------------------
 app.use('/addon', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
+
 
 // Optional: handle OPTIONS preflight requests (Stremio sometimes sends these)
 app.options('/addon/*', (req, res) => {
