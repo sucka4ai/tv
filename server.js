@@ -1,5 +1,5 @@
 /**
- * Shanny IPTV Addon (Static per-playlist manifest)
+ * Shanny IPTV Addon (Static per-playlist manifest, Direct JSON for Stremio)
  * Supports M3U + XC, multiple playlists, Stremio install button, categories, EPG, Unsplash backgrounds
  */
 
@@ -79,32 +79,6 @@ async function fetchXC(username, password, type = 'm3u_plus') {
   return fetchM3U(url);
 }
 
-async function fetchEPG(url) {
-  try {
-    const res = await fetch(url, { timeout: 15000 });
-    const xml = await res.text();
-    const result = await xml2js.parseStringPromise(xml);
-
-    const programs = result.tv?.programme || [];
-    const epgData = {};
-    for (const program of programs) {
-      const channelId = program.$.channel;
-      if (!epgData[channelId]) epgData[channelId] = [];
-      epgData[channelId].push({
-        start: program.$.start,
-        stop: program.$.stop,
-        title: program.title?.[0]?._ || 'No Title',
-        desc: program.desc?.[0]?._ || '',
-      });
-    }
-
-    return epgData;
-  } catch (err) {
-    console.error('❌ Failed to fetch EPG:', err.message);
-    return {};
-  }
-}
-
 // ---------------- MANIFEST GENERATION ----------------
 function buildManifest(name, channels, epgData, categories) {
   return {
@@ -132,9 +106,6 @@ function saveManifest(manifest, filename) {
   fs.writeFileSync(filepath, JSON.stringify(manifest, null, 2));
   return filepath;
 }
-
-// ---------------- STATIC SERVE ----------------
-app.use('/manifests', express.static(MANIFEST_DIR, { setHeaders: (res) => res.setHeader('Access-Control-Allow-Origin', '*') }));
 
 // ---------------- UI ----------------
 app.get('/', (req, res) => {
@@ -174,8 +145,7 @@ app.get('/', (req, res) => {
     <script>
       function generateM3ULink() {
         const url = document.getElementById('m3uUrl').value;
-        const encoded = encodeURIComponent(url);
-        const manifestURL = '${BASE_URL}/generate/m3u?m3uUrl=' + encoded;
+        const manifestURL = '${BASE_URL}/generate/m3u?m3uUrl=' + encodeURIComponent(url);
         const installLink = 'stremio://addon?url=' + manifestURL;
         document.getElementById('m3uResult').innerHTML =
           '<p>Manifest URL: <a href="' + manifestURL + '" target="_blank" class="text-blue-400 underline">' + manifestURL + '</a></p>' +
@@ -204,28 +174,44 @@ app.get('/', (req, res) => {
 app.get('/generate/m3u', async (req, res) => {
   const { m3uUrl } = req.query;
   if (!m3uUrl) return res.status(400).send('m3uUrl required');
+
   const hash = hashString(m3uUrl);
   const filepath = path.join(MANIFEST_DIR, `${hash}.json`);
-  if (!fs.existsSync(filepath)) {
+
+  let manifest;
+  if (fs.existsSync(filepath)) {
+    manifest = JSON.parse(fs.readFileSync(filepath, 'utf-8'));
+  } else {
     const { channels, categories } = await fetchM3U(m3uUrl);
-    const manifest = buildManifest(`Shanny IPTV (M3U)`, channels, {}, categories);
+    manifest = buildManifest(`Shanny IPTV (M3U)`, channels, {}, categories);
     saveManifest(manifest, `${hash}.json`);
   }
-  res.redirect(`/manifests/${hash}.json`);
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.json(manifest);
 });
 
 app.get('/generate/xc', async (req, res) => {
   const { username, password, type } = req.query;
   if (!username || !password) return res.status(400).send('username & password required');
+
   const key = `${username}_${password}_${type || 'm3u_plus'}`;
   const hash = hashString(key);
   const filepath = path.join(MANIFEST_DIR, `${hash}.json`);
-  if (!fs.existsSync(filepath)) {
+
+  let manifest;
+  if (fs.existsSync(filepath)) {
+    manifest = JSON.parse(fs.readFileSync(filepath, 'utf-8'));
+  } else {
     const { channels, categories } = await fetchXC(username, password, type || 'm3u_plus');
-    const manifest = buildManifest(`Shanny IPTV (XC - ${username})`, channels, {}, categories);
+    manifest = buildManifest(`Shanny IPTV (XC - ${username})`, channels, {}, categories);
     saveManifest(manifest, `${hash}.json`);
   }
-  res.redirect(`/manifests/${hash}.json`);
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.json(manifest);
 });
 
 // ---------------- START SERVER ----------------
