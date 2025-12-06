@@ -1,6 +1,6 @@
 /**
- * Shanny IPTV Addon (Static per-playlist manifest, Direct JSON for Stremio)
- * Supports M3U + XC, multiple playlists, Stremio install button, categories, EPG, Unsplash backgrounds
+ * Shanny IPTV Addon (Per-playlist dynamic addon with catalog, meta, stream)
+ * Supports M3U + XC, multiple playlists, categories, EPG, Unsplash backgrounds
  */
 
 const express = require('express');
@@ -8,19 +8,14 @@ const fetch = require('node-fetch');
 const parser = require('iptv-playlist-parser');
 const xml2js = require('xml2js');
 const dayjs = require('dayjs');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
-const { addonBuilder } = require('stremio-addon-sdk');
+const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ---------------- CONFIG ----------------
 const BASE_URL = process.env.BASE_URL || 'https://your-render-url.onrender.com';
-const MANIFEST_DIR = process.env.MANIFEST_DIR || path.join(__dirname, 'tmp', 'manifests');
-if (!fs.existsSync(MANIFEST_DIR)) fs.mkdirSync(MANIFEST_DIR, { recursive: true });
 
 // ---------------- UTILITIES ----------------
 function hashString(str) {
@@ -79,32 +74,71 @@ async function fetchXC(username, password, type = 'm3u_plus') {
   return fetchM3U(url);
 }
 
-// ---------------- MANIFEST GENERATION ----------------
-function buildManifest(name, channels, epgData, categories) {
-  return {
+// ---------------- BUILD ADDON ----------------
+function buildAddon(name, channels, epgData, categories) {
+  const manifest = {
     id: `shanny.dynamic.${hashString(name)}`,
     version: '1.0.0',
     name,
-    description: 'Dynamic IPTV Addon (per-playlist manifest)',
+    description: 'Dynamic IPTV Addon (per-playlist)',
     resources: ['catalog', 'meta', 'stream'],
     types: ['tv'],
     catalogs: [
       {
-        id: 'iptv_catalog',
         type: 'tv',
+        id: 'iptv_catalog',
         name: 'IPTV Channels',
         extra: [{ name: 'genre', options: ['All', ...Array.from(categories).sort()] }],
       },
     ],
-    channels,
-    epgData,
   };
-}
 
-function saveManifest(manifest, filename) {
-  const filepath = path.join(MANIFEST_DIR, filename);
-  fs.writeFileSync(filepath, JSON.stringify(manifest, null, 2));
-  return filepath;
+  const builder = new addonBuilder(manifest);
+
+  // Catalog handler
+  builder.defineCatalogHandler(({ extra }) => {
+    const genre = extra?.genre;
+    const filtered = genre && genre !== 'All' ? channels.filter(ch => ch.category === genre) : channels;
+    return Promise.resolve({
+      metas: filtered.map(ch => ({
+        id: ch.id,
+        type: 'tv',
+        name: ch.name,
+        poster: ch.logo,
+        background: getUnsplashImage(ch.category),
+        description: `Live stream for ${ch.name}`,
+      })),
+    });
+  });
+
+  // Meta handler
+  builder.defineMetaHandler(({ id }) => {
+    const ch = channels.find(c => c.id === id);
+    if (!ch) return Promise.resolve({ meta: {} });
+    const epg = getNowNext(epgData, ch.tvgId);
+    return Promise.resolve({
+      meta: {
+        id: ch.id,
+        type: 'tv',
+        name: ch.name,
+        poster: ch.logo,
+        background: getUnsplashImage(ch.category),
+        description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
+        logo: ch.logo,
+      },
+    });
+  });
+
+  // Stream handler
+  builder.defineStreamHandler(({ id }) => {
+    const ch = channels.find(c => c.id === id);
+    if (!ch) return Promise.resolve({ streams: [] });
+    return Promise.resolve({
+      streams: [{ url: ch.url, title: ch.name, externalUrl: true }],
+    });
+  });
+
+  return builder;
 }
 
 // ---------------- UI ----------------
@@ -125,7 +159,7 @@ app.get('/', (req, res) => {
         <label class="block">M3U URL:
           <input type="url" id="m3uUrl" class="w-full p-2 rounded text-black" placeholder="http://example.com/playlist.m3u" required>
         </label>
-        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 p-2 rounded">Generate Manifest</button>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 p-2 rounded">Generate Addon</button>
       </form>
       <div id="m3uResult" class="mt-4"></div>
 
@@ -133,22 +167,22 @@ app.get('/', (req, res) => {
         <label>XC Username:<input type="text" id="xcUsername" class="w-full p-2 rounded text-black" required></label>
         <label>XC Password:<input type="text" id="xcPassword" class="w-full p-2 rounded text-black" required></label>
         <label>XC Type:<input type="text" id="xcType" class="w-full p-2 rounded text-black" placeholder="m3u_plus"></label>
-        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 p-2 rounded">Generate Manifest</button>
+        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 p-2 rounded">Generate Addon</button>
       </form>
       <div id="xcResult" class="mt-4"></div>
 
       <p class="mt-6 text-gray-400 text-sm">
-        Copy the manifest URL to install manually in Stremio, or click the Install button to open Stremio directly.
+        Click Install button to open in Stremio directly.
       </p>
     </div>
 
     <script>
       function generateM3ULink() {
         const url = document.getElementById('m3uUrl').value;
-        const manifestURL = '${BASE_URL}/generate/m3u?m3uUrl=' + encodeURIComponent(url);
+        const manifestURL = '${BASE_URL}/addon/m3u?m3uUrl=' + encodeURIComponent(url);
         const installLink = 'stremio://addon?url=' + manifestURL;
         document.getElementById('m3uResult').innerHTML =
-          '<p>Manifest URL: <a href="' + manifestURL + '" target="_blank" class="text-blue-400 underline">' + manifestURL + '</a></p>' +
+          '<p>Addon URL: <a href="' + manifestURL + '" target="_blank" class="text-blue-400 underline">' + manifestURL + '</a></p>' +
           '<p><a href="' + installLink + '" class="bg-blue-500 hover:bg-blue-600 p-2 rounded inline-block mt-2">Install in Stremio</a></p>';
       }
 
@@ -156,12 +190,12 @@ app.get('/', (req, res) => {
         const username = document.getElementById('xcUsername').value;
         const password = document.getElementById('xcPassword').value;
         const type = document.getElementById('xcType').value || 'm3u_plus';
-        const manifestURL = '${BASE_URL}/generate/xc?username=' + encodeURIComponent(username) +
+        const manifestURL = '${BASE_URL}/addon/xc?username=' + encodeURIComponent(username) +
                             '&password=' + encodeURIComponent(password) +
                             '&type=' + encodeURIComponent(type);
         const installLink = 'stremio://addon?url=' + manifestURL;
         document.getElementById('xcResult').innerHTML =
-          '<p>Manifest URL: <a href="' + manifestURL + '" target="_blank" class="text-green-400 underline">' + manifestURL + '</a></p>' +
+          '<p>Addon URL: <a href="' + manifestURL + '" target="_blank" class="text-green-400 underline">' + manifestURL + '</a></p>' +
           '<p><a href="' + installLink + '" class="bg-green-500 hover:bg-green-600 p-2 rounded inline-block mt-2">Install in Stremio</a></p>';
       }
     </script>
@@ -170,48 +204,29 @@ app.get('/', (req, res) => {
   `);
 });
 
-// ---------------- GENERATE STATIC MANIFESTS ----------------
-app.get('/generate/m3u', async (req, res) => {
+// ---------------- GENERATE PER-PLAYLIST ADDONS ----------------
+app.get('/addon/m3u', async (req, res) => {
   const { m3uUrl } = req.query;
   if (!m3uUrl) return res.status(400).send('m3uUrl required');
 
   const hash = hashString(m3uUrl);
-  const filepath = path.join(MANIFEST_DIR, `${hash}.json`);
+  const { channels, categories } = await fetchM3U(m3uUrl);
 
-  let manifest;
-  if (fs.existsSync(filepath)) {
-    manifest = JSON.parse(fs.readFileSync(filepath, 'utf-8'));
-  } else {
-    const { channels, categories } = await fetchM3U(m3uUrl);
-    manifest = buildManifest(`Shanny IPTV (M3U)`, channels, {}, categories);
-    saveManifest(manifest, `${hash}.json`);
-  }
-
+  const builder = buildAddon(`Shanny IPTV (M3U)`, channels, {}, categories);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json');
-  res.json(manifest);
+  res.json(builder.getInterface());
 });
 
-app.get('/generate/xc', async (req, res) => {
+app.get('/addon/xc', async (req, res) => {
   const { username, password, type } = req.query;
   if (!username || !password) return res.status(400).send('username & password required');
 
   const key = `${username}_${password}_${type || 'm3u_plus'}`;
-  const hash = hashString(key);
-  const filepath = path.join(MANIFEST_DIR, `${hash}.json`);
+  const { channels, categories } = await fetchXC(username, password, type || 'm3u_plus');
 
-  let manifest;
-  if (fs.existsSync(filepath)) {
-    manifest = JSON.parse(fs.readFileSync(filepath, 'utf-8'));
-  } else {
-    const { channels, categories } = await fetchXC(username, password, type || 'm3u_plus');
-    manifest = buildManifest(`Shanny IPTV (XC - ${username})`, channels, {}, categories);
-    saveManifest(manifest, `${hash}.json`);
-  }
-
+  const builder = buildAddon(`Shanny IPTV (XC - ${username})`, channels, {}, categories);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json');
-  res.json(manifest);
+  res.json(builder.getInterface());
 });
 
 // ---------------- START SERVER ----------------
