@@ -637,18 +637,6 @@ app.get('/addon/generate-install', (req, res) => {
 // Serve static /public if you want to add local backgrounds later
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
-// -------------------- Mount Stremio builder interface safely --------------------
-try {
-  const stremioInterface = builder.getInterface();
-  if (typeof stremioInterface === 'function') {
-    app.use('/stremio', stremioInterface); // mount original addon interface
-    console.log('✅ Mounted stremio interface at /stremio');
-  } else {
-    console.warn('⚠️ builder.getInterface() did not return a function; skipping mount. Original manifest will still be available at /manifest.json');
-  }
-} catch (e) {
-  console.warn('⚠️ Could not mount stremio interface:', e.message);
-}
 
 // Expose the original manifest.json for backwards compatibility (env-mode)
 app.get('/manifest.json', (req, res) => res.json(manifest));
