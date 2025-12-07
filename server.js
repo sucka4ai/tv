@@ -449,11 +449,18 @@ app.get('/addon/m3u/manifest.json', (req, res) => {
 });
 
 app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
-  const { m3uUrl, epgUrl } = readParams(req);
+  const { m3uUrl, epgUrl, genre } = readParams(req);
   try {
     const items = await loadM3UFromUrl(m3uUrl);
     const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
-    const metas = items.map((ch) => {
+
+    // Stremio sends `genre=` filter
+    let filtered = items;
+    if (genre && genre !== 'All') {
+      filtered = items.filter(ch => (ch.category || 'Live') === genre);
+    }
+
+    const metas = filtered.map((ch) => {
       const epg = getNowNextFromEPG(epgMap, ch.tvgId);
       return {
         id: encodeURIComponent(ch.id),
@@ -465,13 +472,14 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
         genres: [ch.category || 'Live'],
       };
     });
+
     res.json({ metas });
   } catch (err) {
     console.error('/addon/m3u/catalog error', err.message);
     res.json({ metas: [] });
   }
-
 });
+
 
 app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
