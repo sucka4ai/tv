@@ -498,7 +498,7 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   }
 });
 
-app.get('/addon/m3u/stream/:id.json', async (req, res) => {
+app.get('/addon/m3u/stream/:type/:id.json', async (req, res) => {
   const { m3uUrl } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
   try {
