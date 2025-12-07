@@ -462,6 +462,15 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
     console.error('/addon/m3u/catalog error', err.message);
     res.json({ metas: [] });
   }
+  // Ensure categories are loaded dynamically
+  if (!categories.length) {
+      const catSet = new Set();
+      playlist.items.forEach(i => {
+          if (i.group) catSet.add(i.group);
+      });
+      categories = [...catSet];
+  }
+
 });
 
 app.get('/addon/m3u/meta/:id.json', async (req, res) => {
