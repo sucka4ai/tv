@@ -435,7 +435,15 @@ app.get('/addon/m3u/manifest.json', (req, res) => {
     description: 'Dynamic M3U addon (per-playlist install)',
     resources: ['catalog', 'meta', 'stream'],
     types: ['tv'],
-    catalogs: [{ id: 'iptv_catalog', type: 'tv', name: 'IPTV Channels' }],
+    catalogs: [
+      {
+        id: 'iptv_catalog',
+        type: 'tv',
+        name: 'Shanny IPTV',
+        extra: [{ name: 'genre', isRequired: false }]
+      }
+    ],
+
   };
   res.json(man);
 });
