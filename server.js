@@ -577,6 +577,16 @@ app.get('/addon/xc/stream/:id.json', async (req, res) => {
   }
 });
 
+// UI backward compatibility for Test Fetch (returns simple JSON instead of HTML)
+app.get('/addon/m3u/catalog.json', (req, res) => {
+    res.json({ ok: true, message: 'Use /addon/m3u/catalog/tv/iptv_catalog.json instead.' });
+});
+
+app.get('/addon/xc/catalog.json', (req, res) => {
+    res.json({ ok: true, message: 'Use /addon/xc/catalog/tv/iptv_catalog.json instead.' });
+});
+
+
 // One-click install generator (returns manifest link HTML)
 app.get('/addon/generate-install', (req, res) => {
   const raw = req.url.split('?')[1] || '';
