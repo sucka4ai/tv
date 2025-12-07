@@ -127,7 +127,7 @@ const manifest = {
       type: 'tv',
       id: 'shannyiptv',
       name: 'Shanny IPTV',
-      extra: [{ name: 'genre', options: ['All'] }],
+      extra: [{ name: 'genre', isRequired: false }],
     },
   ],
   idPrefixes: ['channel-'],
