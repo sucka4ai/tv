@@ -532,11 +532,11 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
 
 app.get('/addon/m3u/stream/:id.json', async (req, res) => {
   const { m3uUrl } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
+  const itemId = req.params.id;
 
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find(c => encodeURIComponent(c.id) === itemId);
+    const ch = items.find((c) => c.id === itemId);
     if (!ch) return res.json({ streams: [] });
 
     return res.json({
@@ -576,7 +576,7 @@ app.get('/addon/xc/catalog/:type/:id.json', async (req, res) => {
   try {
     const items = await loadXCAsM3U({ host, user, pass });
     const metas = items.map((ch) => ({
-      id: encodeURIComponent(ch.id),
+      id: `xc:${ch.id}`,
       name: ch.name,
       type: 'tv',
       poster: ch.logo,
@@ -600,7 +600,7 @@ app.get('/addon/xc/meta/:id.json', async (req, res) => {
     if (!ch) return res.json({ meta: {} });
     return res.json({
       meta: {
-        id: ch.id,
+        id: `xc:${ch.id}`,
         type: 'tv',
         name: ch.name,
         poster: ch.logo,
