@@ -502,20 +502,24 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
 app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
+
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
+    const ch = items.find(c => encodeURIComponent(c.id) === itemId);
     if (!ch) return res.json({ meta: {} });
+
     const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
     const epg = getNowNextFromEPG(epgMap, ch.tvgId);
+
     return res.json({
       meta: {
-        id: ch.id,
+        id: encodeURIComponent(ch.id), // use same ID as catalog
         type: 'tv',
         name: ch.name,
         poster: ch.logo,
         background: getUnsplashImage(ch.category),
         description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
+        genres: [ch.category || 'Live'], // optional but good for genre filtering
       },
     });
   } catch (err) {
@@ -524,19 +528,31 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   }
 });
 
-app.get('/addon/m3u/stream/:type/:id.json', async (req, res) => {
+
+app.get('/addon/m3u/stream/:id.json', async (req, res) => {
   const { m3uUrl } = readParams(req);
   const itemId = decodeURIComponent(req.params.id);
+
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
+    const ch = items.find(c => encodeURIComponent(c.id) === itemId);
     if (!ch) return res.json({ streams: [] });
-    return res.json({ streams: [{ url: ch.url, title: ch.name, externalUrl: true }] });
+
+    return res.json({
+      streams: [
+        {
+          url: ch.url,
+          title: ch.name,
+          externalUrl: true,
+        },
+      ],
+    });
   } catch (err) {
     console.error('/addon/m3u/stream error', err.message);
     res.json({ streams: [] });
   }
 });
+
 
 // XC dynamic manifest
 app.get('/addon/xc/manifest.json', (req, res) => {
