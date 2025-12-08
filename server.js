@@ -346,7 +346,7 @@ async function loadM3UFromUrl(m3uUrl) {
   const text = await r.text();
   const parsed = parser.parse(text);
   return parsed.items.map((item, idx) => ({
-    id: `dyn-${idx}-${encodeURIComponent(item.url)}`,
+    id: `m3u-${idx}-${item.url}`,
     name: item.name,
     url: item.url,
     logo: item.tvg?.logo || null,
@@ -384,7 +384,7 @@ async function loadXCAsM3U({ host, user, pass }) {
     const text = await r2.text();
     const parsed = parser.parse(text);
     return parsed.items.map((item, idx) => ({
-      id: `xc-m3u-${idx}-${encodeURIComponent(item.url)}`,
+      id: `xc-m3u-${idx}-${item.url}`,
       name: item.name,
       url: item.url,
       logo: item.tvg?.logo || null,
