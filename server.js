@@ -477,7 +477,7 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
     const metas = filtered.map((ch) => {
       const epg = getNowNextFromEPG(epgMap, ch.tvgId);
       return {
-        id: encodeURIComponent(ch.id),
+        id: ch.id,
         name: ch.name,
         type: 'tv',
         poster: ch.logo,
@@ -502,11 +502,11 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
 
 app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
+  const itemId = req.params.id;
 
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find(c => encodeURIComponent(c.id) === itemId);
+    const ch = items.find(c => c.id === itemId);
     if (!ch) return res.json({ meta: {} });
 
     const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
@@ -514,7 +514,7 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
 
     return res.json({
       meta: {
-        id: encodeURIComponent(ch.id), // use same ID as catalog
+        id: ch.id, // use same ID as catalog
         type: 'tv',
         name: ch.name,
         poster: ch.logo,
@@ -593,10 +593,10 @@ app.get('/addon/xc/catalog/:type/:id.json', async (req, res) => {
 
 app.get('/addon/xc/meta/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
+  const itemId = req.params.id;
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
+    const ch = items.find((c) => c.id === itemId);
     if (!ch) return res.json({ meta: {} });
     return res.json({
       meta: {
@@ -616,10 +616,10 @@ app.get('/addon/xc/meta/:id.json', async (req, res) => {
 
 app.get('/addon/xc/stream/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
-  const itemId = decodeURIComponent(req.params.id);
+  const itemId = req.params.id;
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => encodeURIComponent(c.id) === itemId);
+    const ch = items.find((c) => c.id === itemId);
     if (!ch) return res.json({ streams: [] });
     const streamUrl = ch.url || `http://${host}/live/${user}/${pass}/${ch.tvgId}.m3u8`;
     return res.json({ streams: [{ url: streamUrl, title: ch.name, externalUrl: true }] });
