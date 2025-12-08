@@ -424,10 +424,23 @@ async function fetchEPGFromUrl(epgUrl) {
 
 // -------------------- Dynamic endpoints mounted under /addon --------------------
 
-// M3U dynamic manifest
-app.get('/addon/m3u/manifest.json', (req, res) => {
-  const params = readParams(req);
-  const idSuffix = params.m3uUrl ? encodeURIComponent(params.m3uUrl).slice(0, 40) : Date.now();
+// -------------------- Dynamic M3U manifest --------------------
+app.get('/addon/m3u/manifest.json', async (req, res) => {
+  const { m3uUrl } = readParams(req);
+  const idSuffix = m3uUrl ? encodeURIComponent(m3uUrl).slice(0, 40) : Date.now();
+
+  // Load M3U to get categories
+  let items = [];
+  try {
+    items = await loadM3UFromUrl(m3uUrl);
+  } catch (err) {
+    console.error('Error loading M3U for manifest:', err.message);
+  }
+
+  // Build categories for Stremio
+  const catSet = new Set(items.map(ch => ch.category || 'Live'));
+  const catArray = ['All', ...Array.from(catSet).sort()];
+
   const man = {
     id: `shanny.m3u.${idSuffix}`,
     version: '1.0.0',
@@ -440,13 +453,14 @@ app.get('/addon/m3u/manifest.json', (req, res) => {
         id: 'iptv_catalog',
         type: 'tv',
         name: 'Shanny IPTV',
-        extra: [{ name: 'genre', isRequired: false }]
-      }
+        extra: [{ name: 'genre', isRequired: false, options: catArray }],
+      },
     ],
-
   };
+
   res.json(man);
 });
+
 
 app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl, genre } = readParams(req);
@@ -475,7 +489,6 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
 
     const catSet = new Set(items.map(ch => ch.category || "Live"));
     const catArray = ["All", ...Array.from(catSet).sort()];
-    manifest.catalogs[0].extra[0].options = catArray;
 
 
     res.json({ metas });
