@@ -573,10 +573,14 @@ app.get('/addon/m3u/stream/:id.json', async (req, res) => {
 });
 
 
-// XC dynamic manifest
+// -------------------- Dynamic XC manifest (query param version) --------------------
 app.get('/addon/xc/manifest.json', (req, res) => {
-  const params = readParams(req);
-  const idSuffix = params.host ? encodeURIComponent(params.host).slice(0, 40) : Date.now();
+  const { host, user, pass } = readParams(req);
+  if (!host || !user || !pass) {
+    return res.status(400).json({ error: 'Missing host, user, or pass' });
+  }
+
+  const idSuffix = encodeURIComponent(host).slice(0, 40);
   const man = {
     id: `shanny.xc.${idSuffix}`,
     version: '1.0.0',
@@ -589,11 +593,14 @@ app.get('/addon/xc/manifest.json', (req, res) => {
   res.json(man);
 });
 
+// -------------------- Catalog (dynamic) --------------------
 app.get('/addon/xc/catalog/:type/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
+  if (!host || !user || !pass) return res.json({ metas: [] });
+
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const metas = items.map((ch) => ({
+    const metas = items.map(ch => ({
       id: `xc:${ch.id}`,
       name: ch.name,
       type: 'tv',
@@ -609,18 +616,20 @@ app.get('/addon/xc/catalog/:type/:id.json', async (req, res) => {
   }
 });
 
+// -------------------- Meta (dynamic) --------------------
 app.get('/addon/xc/meta/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
-  const rawId = req.params.id.replace(/^xc:/, ""); // <-- FIXED
+  const rawId = req.params.id.replace(/^xc:/, "");
+  if (!host || !user || !pass) return res.json({ meta: {} });
 
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => String(c.id) === rawId); // <-- FIXED
+    const ch = items.find(c => String(c.id) === rawId);
     if (!ch) return res.json({ meta: {} });
 
-    return res.json({
+    res.json({
       meta: {
-        id: `xc:${ch.id}`, // <-- MUST MATCH CATALOG ID
+        id: `xc:${ch.id}`,
         type: 'tv',
         name: ch.name,
         poster: ch.logo,
@@ -635,18 +644,19 @@ app.get('/addon/xc/meta/:id.json', async (req, res) => {
   }
 });
 
+// -------------------- Stream (dynamic) --------------------
 app.get('/addon/xc/stream/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
-  const rawId = req.params.id.replace(/^xc:/, ""); // <-- FIXED
+  const rawId = req.params.id.replace(/^xc:/, "");
+  if (!host || !user || !pass) return res.json({ streams: [] });
 
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => String(c.id) === rawId); // <-- FIXED
+    const ch = items.find(c => String(c.id) === rawId);
     if (!ch) return res.json({ streams: [] });
 
     const streamUrl = ch.url || `http://${host}/live/${user}/${pass}/${ch.tvgId}.m3u8`;
-
-    return res.json({
+    res.json({
       streams: [
         {
           url: streamUrl,
