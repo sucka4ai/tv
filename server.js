@@ -489,7 +489,6 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
 
     const catSet = new Set(items.map(ch => ch.category || "Live"));
     const catArray = ["All", ...Array.from(catSet).sort()];
-    manifest.catalogs[0].extra[0].options = catArray;
 
 
     res.json({ metas });
