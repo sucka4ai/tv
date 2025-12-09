@@ -295,7 +295,7 @@ app.get('/', (req, res) => {
         if (!m3u) return alert('Enter M3U URL');
         resText.textContent = 'Testing...';
         try {
-          const r = await fetch('/addon/m3u/catalog.json?m3uUrl=' + encodeURIComponent(m3u));
+          const r = await fetch('/addon/m3u/catalog/tv/iptv_catalog.json?m3uUrl=' + encodeURIComponent(m3u));
           const j = await r.json();
           resText.textContent = 'Found ' + (j.metas?.length || 0) + ' channels';
         } catch (e) {
@@ -311,7 +311,7 @@ app.get('/', (req, res) => {
         if (!host || !user || !pass) return alert('Enter XC host, user and pass');
         resText.textContent = 'Testing...';
         try {
-          const r = await fetch('/addon/xc/catalog.json?host=' + encodeURIComponent(host) + '&user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass));
+          const r = await fetch('/addon/xc/catalog/tv/iptv_catalog.json?host=' + encodeURIComponent(host) + '&user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass));
           const j = await r.json();
           resText.textContent = 'Found ' + (j.metas?.length || 0) + ' channels';
         } catch (e) {
