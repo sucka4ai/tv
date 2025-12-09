@@ -592,19 +592,22 @@ app.get('/addon/xc/catalog/:type/:id.json', async (req, res) => {
 
 app.get('/addon/xc/meta/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
-  const itemId = req.params.id;
+  const rawId = req.params.id.replace(/^xc:/, ""); // <-- FIXED
+
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => c.id === itemId);
+    const ch = items.find((c) => String(c.id) === rawId); // <-- FIXED
     if (!ch) return res.json({ meta: {} });
+
     return res.json({
       meta: {
-        id: `xc:${ch.id}`,
+        id: `xc:${ch.id}`, // <-- MUST MATCH CATALOG ID
         type: 'tv',
         name: ch.name,
         poster: ch.logo,
         background: getUnsplashImage(ch.category),
         description: `Live stream for ${ch.name}`,
+        genres: [ch.category || 'Live'],
       },
     });
   } catch (err) {
@@ -615,13 +618,24 @@ app.get('/addon/xc/meta/:id.json', async (req, res) => {
 
 app.get('/addon/xc/stream/:id.json', async (req, res) => {
   const { host, user, pass } = readParams(req);
-  const itemId = req.params.id;
+  const rawId = req.params.id.replace(/^xc:/, ""); // <-- FIXED
+
   try {
     const items = await loadXCAsM3U({ host, user, pass });
-    const ch = items.find((c) => c.id === itemId);
+    const ch = items.find((c) => String(c.id) === rawId); // <-- FIXED
     if (!ch) return res.json({ streams: [] });
+
     const streamUrl = ch.url || `http://${host}/live/${user}/${pass}/${ch.tvgId}.m3u8`;
-    return res.json({ streams: [{ url: streamUrl, title: ch.name, externalUrl: true }] });
+
+    return res.json({
+      streams: [
+        {
+          url: streamUrl,
+          title: ch.name,
+          externalUrl: true,
+        },
+      ],
+    });
   } catch (err) {
     console.error('/addon/xc/stream error', err.message);
     res.json({ streams: [] });
