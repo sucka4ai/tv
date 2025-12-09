@@ -452,25 +452,24 @@ async function fetchEPGFromUrl(epgUrl) {
 
 // -------------------- Dynamic endpoints mounted under /addon --------------------
 
-// -------------------- Dynamic M3U manifest --------------------
+// -------------------- Dynamic M3U manifest (query param version) --------------------
 app.get('/addon/m3u/manifest.json', async (req, res) => {
-  const { m3uUrl } = readParams(req);
-  const idSuffix = m3uUrl ? encodeURIComponent(m3uUrl).slice(0, 40) : Date.now();
+  const { m3uUrl } = readParams(req); // read query param ?m3uUrl=
+  if (!m3uUrl) return res.status(400).json({ error: 'Missing m3uUrl' });
 
-  // Load M3U to get categories
   let items = [];
   try {
-    items = await loadM3UFromUrl(m3uUrl);
+    items = await loadM3UFromUrl(m3uUrl); // load channels dynamically
   } catch (err) {
     console.error('Error loading M3U for manifest:', err.message);
   }
 
-  // Build categories for Stremio
+  // build unique categories
   const catSet = new Set(items.map(ch => ch.category || 'Live'));
   const catArray = ['All', ...Array.from(catSet).sort()];
 
   const man = {
-    id: `shanny.m3u.${idSuffix}`,
+    id: `shanny.m3u.${encodeURIComponent(m3uUrl).slice(0, 40)}`,
     version: '1.0.0',
     name: `Shanny (M3U)`,
     description: 'Dynamic M3U addon (per-playlist install)',
@@ -489,30 +488,28 @@ app.get('/addon/m3u/manifest.json', async (req, res) => {
   res.json(man);
 });
 
-
+// -------------------- Catalog (dynamic) --------------------
 app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
-  const { m3uUrl, epgUrl, genre } = readParams(req);
+  const { m3uUrl, genre } = readParams(req);
+  if (!m3uUrl) return res.json({ metas: [] });
+
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
 
     let filtered = items;
     if (genre && genre !== 'All') {
       filtered = items.filter(ch => (ch.category || 'Live') === genre);
     }
 
-    const metas = filtered.map((ch) => {
-      const epg = getNowNextFromEPG(epgMap, ch.tvgId);
-      return {
-        id: `m3u:${ch.id}`,
-        name: ch.name,
-        type: 'tv',
-        poster: ch.logo,
-        background: getUnsplashImage(ch.category),
-        description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
-        genres: [ch.category || 'Live'],
-      };
-    });
+    const metas = filtered.map(ch => ({
+      id: `m3u:${ch.id}`,
+      name: ch.name,
+      type: 'tv',
+      poster: ch.logo,
+      background: getUnsplashImage(ch.category),
+      description: 'Live stream',
+      genres: [ch.category || 'Live'],
+    }));
 
     res.json({ metas });
   } catch (err) {
@@ -521,18 +518,16 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
   }
 });
 
-
+// -------------------- Meta (dynamic) --------------------
 app.get('/addon/m3u/meta/:id.json', async (req, res) => {
-  const { m3uUrl, epgUrl } = readParams(req);
+  const { m3uUrl } = readParams(req);
   const rawId = req.params.id.replace(/^m3u:/, "");
+  if (!m3uUrl) return res.json({ meta: {} });
 
   try {
     const items = await loadM3UFromUrl(m3uUrl);
     const ch = items.find(c => String(c.id) === rawId);
     if (!ch) return res.json({ meta: {} });
-
-    const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
-    const epg = getNowNextFromEPG(epgMap, ch.tvgId);
 
     return res.json({
       meta: {
@@ -541,7 +536,7 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
         name: ch.name,
         poster: ch.logo,
         background: getUnsplashImage(ch.category),
-        description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
+        description: `Live stream for ${ch.name}`,
         genres: [ch.category || 'Live'],
       },
     });
@@ -551,14 +546,15 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   }
 });
 
-
+// -------------------- Stream (dynamic) --------------------
 app.get('/addon/m3u/stream/:id.json', async (req, res) => {
   const { m3uUrl } = readParams(req);
   const rawId = req.params.id.replace(/^m3u:/, "");
+  if (!m3uUrl) return res.json({ streams: [] });
 
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find((c) => String(c.id) === rawId);
+    const ch = items.find(c => String(c.id) === rawId);
     if (!ch) return res.json({ streams: [] });
 
     return res.json({
