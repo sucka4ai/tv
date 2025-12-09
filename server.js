@@ -468,7 +468,6 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
     const items = await loadM3UFromUrl(m3uUrl);
     const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
 
-    // Stremio sends `genre=` filter
     let filtered = items;
     if (genre && genre !== 'All') {
       filtered = items.filter(ch => (ch.category || 'Live') === genre);
@@ -477,7 +476,7 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
     const metas = filtered.map((ch) => {
       const epg = getNowNextFromEPG(epgMap, ch.tvgId);
       return {
-        id: `m3u:${ch.id}`
+        id: `m3u:${ch.id}`,
         name: ch.name,
         type: 'tv',
         poster: ch.logo,
@@ -486,10 +485,6 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
         genres: [ch.category || 'Live'],
       };
     });
-
-    const catSet = new Set(items.map(ch => ch.category || "Live"));
-    const catArray = ["All", ...Array.from(catSet).sort()];
-
 
     res.json({ metas });
   } catch (err) {
@@ -501,11 +496,11 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
 
 app.get('/addon/m3u/meta/:id.json', async (req, res) => {
   const { m3uUrl, epgUrl } = readParams(req);
-  const itemId = req.params.id;
+  const rawId = req.params.id.replace(/^m3u:/, "");
 
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find(c => c.id === itemId);
+    const ch = items.find(c => String(c.id) === rawId);
     if (!ch) return res.json({ meta: {} });
 
     const epgMap = epgUrl ? await fetchEPGFromUrl(epgUrl) : {};
@@ -513,13 +508,13 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
 
     return res.json({
       meta: {
-        id: ch.id, // use same ID as catalog
+        id: `m3u:${ch.id}`,
         type: 'tv',
         name: ch.name,
         poster: ch.logo,
         background: getUnsplashImage(ch.category),
         description: `${epg.now?.title || 'No EPG'} — ${epg.next?.title || 'No info'}`,
-        genres: [ch.category || 'Live'], // optional but good for genre filtering
+        genres: [ch.category || 'Live'],
       },
     });
   } catch (err) {
@@ -531,11 +526,11 @@ app.get('/addon/m3u/meta/:id.json', async (req, res) => {
 
 app.get('/addon/m3u/stream/:id.json', async (req, res) => {
   const { m3uUrl } = readParams(req);
-  const itemId = req.params.id;
+  const rawId = req.params.id.replace(/^m3u:/, "");
 
   try {
     const items = await loadM3UFromUrl(m3uUrl);
-    const ch = items.find((c) => c.id === itemId);
+    const ch = items.find((c) => String(c.id) === rawId);
     if (!ch) return res.json({ streams: [] });
 
     return res.json({
