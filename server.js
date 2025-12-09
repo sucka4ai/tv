@@ -330,13 +330,41 @@ app.get('/', (req, res) => {
 
 // -------------------- Utility functions used by dynamic endpoints --------------------
 function readParams(req) {
-  return {
-    m3uUrl: req.query.m3uUrl || req.query.url || null,
-    epgUrl: req.query.epgUrl || null,
-    host: req.query.host || null,
-    user: req.query.user || null,
-    pass: req.query.pass || null,
+  const q = req.query || {};
+
+  // Always safely decode
+  const decode = (v) => {
+    try {
+      return v ? decodeURIComponent(v) : "";
+    } catch {
+      return v || "";
+    }
   };
+
+  const params = {
+    m3uUrl: decode(q.m3uUrl),
+    epgUrl: decode(q.epgUrl),
+    host: decode(q.host),
+    user: decode(q.user),
+    pass: decode(q.pass),
+    genre: decode(q.genre),
+  };
+
+  // -------------------------------------------
+  // IMPORTANT: Persist last known M3U/XC params
+  // -------------------------------------------
+  if (!global._lastParams) global._lastParams = {};
+
+  // If a param is missing but we have a previous one, restore it
+  for (const key of Object.keys(params)) {
+    if (params[key]) {
+      global._lastParams[key] = params[key];
+    } else if (global._lastParams[key]) {
+      params[key] = global._lastParams[key];
+    }
+  }
+
+  return params;
 }
 
 async function loadM3UFromUrl(m3uUrl) {
