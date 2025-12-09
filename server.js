@@ -275,7 +275,6 @@ app.get('/', (req, res) => {
         params.set('m3uUrl', m3u);
         if (epg) params.set('epgUrl', epg);
         window.open('/addon/m3u/manifest.json?' + params.toString(), '_blank');
-        window.open('/addon/generate-install?' + params.toString(), '_blank');
       });
 
       document.getElementById('generateXC').addEventListener('click', () => {
@@ -288,7 +287,6 @@ app.get('/', (req, res) => {
         params.set('user', user);
         params.set('pass', pass);
         window.open('/addon/xc/manifest.json?' + params.toString(), '_blank');
-        window.open('/addon/generate-install?' + params.toString(), '_blank');
       });
 
       document.getElementById('testM3U').addEventListener('click', async () => {
