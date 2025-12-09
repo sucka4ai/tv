@@ -477,7 +477,7 @@ app.get('/addon/m3u/catalog/:type/:id.json', async (req, res) => {
     const metas = filtered.map((ch) => {
       const epg = getNowNextFromEPG(epgMap, ch.tvgId);
       return {
-        id: ch.id,
+        id: `m3u:${ch.id}`
         name: ch.name,
         type: 'tv',
         poster: ch.logo,
